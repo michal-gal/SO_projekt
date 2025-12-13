@@ -7,46 +7,51 @@
 #include <sys/shm.h>
 #include <sys/wait.h>
 #include <semaphore.h>
+#include <signal.h>
+#include <fcntl.h>
 
-// Stałe
-#define MAX_QUEUE 100
-#define MAX_BELT 50
-#define MAX_TABLES 20
-#define MAX_VIP 0.02 // 2%
+// Definicje stałych
+#define MAX_QUEUE 50
+#define MAX_BELT 100
+#define MAX_TABLES 10
 
-// Struktury
+// Struktury danych
 typedef struct
 {
-    int price;     // 10,15,20 for basic, 40,50,60 for special
-    int for_table; // -1 if general, else table id
-} Plate;
-
-typedef struct
-{
-    int size; // 1-4
+    int size;
     int is_vip;
-    int has_children;      // 1 if group has children <=10
-    int adult_supervisors; // adults supervising children
+    int has_children;
+    int adult_supervisors;
 } Group;
 
 typedef struct
 {
-    int capacity; // 1,2,3,4
-    int occupied; // current group size
+    int price;
+    int for_table;
+} Plate;
+
+typedef struct
+{
+    int occupied;
+    int capacity;
     Group group;
 } Table;
 
 typedef struct
 {
-    Plate belt[MAX_BELT];
-    int head, tail, count;
-} ConveyorBelt;
+    Group queue[MAX_QUEUE];
+    int front;
+    int rear;
+    int count;
+} CustomerQueue;
 
 typedef struct
 {
-    Group queue[MAX_QUEUE];
-    int front, rear, count;
-} CustomerQueue;
+    Plate belt[MAX_BELT];
+    int head;
+    int tail;
+    int count;
+} ConveyorBelt;
 
 // Globalne zmienne - teraz współdzielone
 CustomerQueue *customer_queue;
@@ -54,10 +59,13 @@ ConveyorBelt *belt;
 Table *tables;
 int *total_customers;
 int *vip_count;
-int *signal;      // Sygnał kierownika
-sem_t *queue_sem; // Semafor dla kolejki
-sem_t *belt_sem;  // Semafor dla taśmy
-sem_t *table_sem; // Semafor dla stolików
+int *manager_signal;           // Sygnał kierownika
+sem_t *queue_sem;              // Semafor dla kolejki
+sem_t *belt_sem;               // Semafor dla taśmy
+sem_t *table_sem;              // Semafor dla stolików
+int P;                         // Maksymalna pojemność taśmy
+int X1, X2, X3, X4, N, Tp, Tk; // Zmienne konfiguracyjne
+FILE *report;                  // Plik raportu
 
 // Funkcje pomocnicze - dostosuj do wskaźników
 void init_belt()
@@ -190,9 +198,9 @@ void staff_process()
         }
 
         int speed = 1;
-        if (*signal == 1)
+        if (*manager_signal == 1)
             speed = 2;
-        else if (*signal == 2)
+        else if (*manager_signal == 2)
             speed = 0.5;
 
         for (int i = 0; i < speed; i++)
@@ -225,8 +233,8 @@ void manager_process()
     while (1)
     {
         sleep(20);
-        *signal = rand() % 4;
-        if (*signal == 3)
+        *manager_signal = rand() % 4;
+        if (*manager_signal == 3)
         {
             sem_wait(table_sem);
             for (int i = 0; i < MAX_TABLES; i++)
@@ -241,7 +249,7 @@ void manager_process()
         }
         else
         {
-            fprintf(report, "Sygnał kierownika: %d\n", *signal);
+            fprintf(report, "Sygnał kierownika: %d\n", *manager_signal);
         }
     }
 }
@@ -264,7 +272,7 @@ int main()
     tables = (Table *)shmat(shm_tables, NULL, 0);
     total_customers = (int *)shmat(shm_total, NULL, 0);
     vip_count = (int *)shmat(shm_vip, NULL, 0);
-    signal = (int *)shmat(shm_signal, NULL, 0);
+    manager_signal = (int *)shmat(shm_signal, NULL, 0);
 
     // Inicjalizacja semaforów
     queue_sem = sem_open("/queue_sem", O_CREAT, 0644, 1);
@@ -276,7 +284,7 @@ int main()
     init_queue();
     *total_customers = 0;
     *vip_count = 0;
-    *signal = 0;
+    *manager_signal = 0;
     X1 = 5;
     X2 = 3;
     X3 = 2;
