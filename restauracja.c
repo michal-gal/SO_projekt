@@ -19,8 +19,8 @@ typedef struct Grupa
 {
     int wielkosc;
     int VIP;
-    int ma_dzieci;
-    int dorosli_opiekunowie;
+    int dzieci;
+    int dorosli;
 } Grupa;
 
 typedef struct Talerz
@@ -53,7 +53,7 @@ typedef struct
 } Tasma;
 
 // Globalne zmienne - teraz współdzielone
-Kolejka *klient_kolejka;
+Kolejka *kolejka_klientow;
 Tasma *tasma;
 Stolik *stoly;
 int *total_klients;
@@ -102,19 +102,19 @@ Talerz usun_z_tasma()
 
 void inicjuj_kolejka()
 {
-    klient_kolejka->przod = 0;
-    klient_kolejka->tyl = 0;
-    klient_kolejka->licznik = 0;
+    kolejka_klientow->przod = 0;
+    kolejka_klientow->tyl = 0;
+    kolejka_klientow->licznik = 0;
 }
 
 void zakolejkuj(Grupa g)
 {
     sem_wait(kolejka_sem);
-    if (klient_kolejka->licznik < MAX_KOLEJKA)
+    if (kolejka_klientow->licznik < MAX_KOLEJKA)
     {
-        klient_kolejka->kolejka[klient_kolejka->tyl] = g;
-        klient_kolejka->tyl = (klient_kolejka->tyl + 1) % MAX_KOLEJKA;
-        klient_kolejka->licznik++;
+        kolejka_klientow->kolejka[kolejka_klientow->tyl] = g;
+        kolejka_klientow->tyl = (kolejka_klientow->tyl + 1) % MAX_KOLEJKA;
+        kolejka_klientow->licznik++;
     }
     sem_post(kolejka_sem);
 }
@@ -123,17 +123,17 @@ Grupa wykolejkuj()
 {
     Grupa g = {0, 0, 0, 0};
     sem_wait(kolejka_sem);
-    if (klient_kolejka->licznik > 0)
+    if (kolejka_klientow->licznik > 0)
     {
-        g = klient_kolejka->kolejka[klient_kolejka->przod];
-        klient_kolejka->przod = (klient_kolejka->przod + 1) % MAX_KOLEJKA;
-        klient_kolejka->licznik--;
+        g = kolejka_klientow->kolejka[kolejka_klientow->przod];
+        kolejka_klientow->przod = (kolejka_klientow->przod + 1) % MAX_KOLEJKA;
+        kolejka_klientow->licznik--;
     }
     sem_post(kolejka_sem);
     return g;
 }
 
-void klient_proces()
+void proces_klienta()
 {
     while (1)
     {
@@ -141,8 +141,8 @@ void klient_proces()
         Grupa g;
         g.wielkosc = rand() % 4 + 1;
         g.VIP = (rand() % 100 < 2) ? 1 : 0;
-        g.ma_dzieci = rand() % 2;
-        g.dorosli_opiekunowie = g.ma_dzieci ? rand() % 3 + 1 : 0;
+        g.dzieci = rand() % 2;
+        g.dorosli = g.dzieci ? rand() % 3 + 1 : 0;
 
         if (g.VIP)
         {
@@ -168,11 +168,11 @@ void klient_proces()
     }
 }
 
-void obsluga_proces()
+void proces_obslugi()
 {
     while (1)
     {
-        if (klient_kolejka->licznik > 0)
+        if (kolejka_klientow->licznik > 0)
         {
             Grupa g = wykolejkuj();
             int dolacz = 0;
@@ -213,7 +213,7 @@ void obsluga_proces()
     }
 }
 
-void kucharz_proces()
+void proces_kucharza()
 {
     while (1)
     {
@@ -226,7 +226,7 @@ void kucharz_proces()
     }
 }
 
-void kierownik_proces()
+void proces_kierownika()
 {
     while (1)
     {
@@ -240,7 +240,7 @@ void kierownik_proces()
                 stoly[i].zajety = 0;
             }
             sem_wait(kolejka_sem);
-            klient_kolejka->licznik = 0;
+            kolejka_klientow->licznik = 0;
             sem_post(kolejka_sem);
             sem_post(table_sem);
             fprintf(raport, "Sygnał 3: Wszyscy opuszczają restaurację.\n");
@@ -265,7 +265,7 @@ int main()
     int shm_vip = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
     int shm_signal = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
 
-    klient_kolejka = (Kolejka *)shmat(shm_kolejka, NULL, 0);
+    kolejka_klientow = (Kolejka *)shmat(shm_kolejka, NULL, 0);
     tasma = (Tasma *)shmat(shm_tasma, NULL, 0);
     stoly = (Stolik *)shmat(shm_stoly, NULL, 0);
     total_klients = (int *)shmat(shm_total, NULL, 0);
@@ -303,31 +303,31 @@ int main()
         stoly[idx++].pojemnosc = 4;
 
     // Tworzenie procesów
-    pid_t pid_klient = fork();
-    if (pid_klient == 0)
+    pid_t pid_klienta = fork();
+    if (pid_klienta == 0)
     {
-        klient_proces();
+        proces_klienta();
         exit(0);
     }
 
-    pid_t pid_obsluga = fork();
-    if (pid_obsluga == 0)
+    pid_t pid_obslugi = fork();
+    if (pid_obslugi == 0)
     {
-        obsluga_proces();
+        proces_obslugi();
         exit(0);
     }
 
-    pid_t pid_kucharz = fork();
-    if (pid_kucharz == 0)
+    pid_t pid_kucharza = fork();
+    if (pid_kucharza == 0)
     {
-        kucharz_proces();
+        proces_kucharza();
         exit(0);
     }
 
-    pid_t pid_kierownik = fork();
-    if (pid_kierownik == 0)
+    pid_t pid_kierownika = fork();
+    if (pid_kierownika == 0)
     {
-        kierownik_proces();
+        proces_kierownika();
         exit(0);
     }
 
@@ -335,16 +335,16 @@ int main()
     sleep(10);
 
     // Zabij procesy potomne
-    kill(pid_klient, SIGTERM);
-    kill(pid_obsluga, SIGTERM);
-    kill(pid_kucharz, SIGTERM);
-    kill(pid_kierownik, SIGTERM);
+    kill(pid_klienta, SIGTERM);
+    kill(pid_obslugi, SIGTERM);
+    kill(pid_kucharza, SIGTERM);
+    kill(pid_kierownika, SIGTERM);
 
     // Podsumowanie
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
 
     // Czyszczenie
-    shmdt(klient_kolejka);
+    shmdt(kolejka_klientow);
     shmctl(shm_kolejka, IPC_RMID, NULL);
     shmdt(tasma);
     shmctl(shm_tasma, IPC_RMID, NULL);
