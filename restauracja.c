@@ -56,7 +56,7 @@ typedef struct
 Kolejka *kolejka_klientow;
 Tasma *tasma;
 Stolik *stoly;
-int *total_klients;
+int *wszyscy_klienci;
 int *vip_licznik;
 int *kierownik_signal;         // Sygnał kierownika
 sem_t *kolejka_sem;            // Semafor dla kolejki
@@ -268,7 +268,7 @@ int main()
     kolejka_klientow = (Kolejka *)shmat(shm_kolejka, NULL, 0);
     tasma = (Tasma *)shmat(shm_tasma, NULL, 0);
     stoly = (Stolik *)shmat(shm_stoly, NULL, 0);
-    total_klients = (int *)shmat(shm_total, NULL, 0);
+    wszyscy_klienci = (int *)shmat(shm_total, NULL, 0);
     vip_licznik = (int *)shmat(shm_vip, NULL, 0);
     kierownik_signal = (int *)shmat(shm_signal, NULL, 0);
 
@@ -280,7 +280,7 @@ int main()
     // Inicjalizacja
     inicjuj_tasma();
     inicjuj_kolejka();
-    *total_klients = 0;
+    *wszyscy_klienci = 0;
     *vip_licznik = 0;
     *kierownik_signal = 0;
     X1 = 5;
@@ -336,9 +336,9 @@ int main()
 
     // Zabij procesy potomne
     kill(pid_klienta, SIGTERM);
-    kill(pid_obslugi, SIGTERM);
+    kill(pid_obsluga, SIGTERM);
     kill(pid_kucharza, SIGTERM);
-    kill(pid_kierownika, SIGTERM);
+    kill(pid_kierownik, SIGTERM);
 
     // Podsumowanie
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
@@ -350,7 +350,7 @@ int main()
     shmctl(shm_tasma, IPC_RMID, NULL);
     shmdt(stoly);
     shmctl(shm_stoly, IPC_RMID, NULL);
-    shmdt(total_klients);
+    shmdt(wszyscy_klienci);
     shmctl(shm_total, IPC_RMID, NULL);
     shmdt(vip_licznik);
     shmctl(shm_vip, IPC_RMID, NULL);
