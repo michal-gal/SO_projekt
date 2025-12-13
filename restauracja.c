@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <pthread.h> // Usuń, jeśli nie używasz wątków
 #include <unistd.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
@@ -16,47 +15,47 @@
 #define MAX_TABLES 10
 
 // Struktury danych
-typedef struct
+typedef struct Grupa
 {
     int size;
     int is_vip;
     int has_children;
     int adult_supervisors;
-} Group;
+} Grupa;
 
-typedef struct
+typedef struct Talerz
 {
     int price;
     int for_table;
-} Plate;
+} Talerz;
 
-typedef struct
+typedef struct Stolik
 {
     int occupied;
     int capacity;
-    Group group;
-} Table;
+    Grupa grupa;
+} Stolik;
 
 typedef struct
 {
-    Group queue[MAX_QUEUE];
+    Grupa queue[MAX_QUEUE];
     int front;
     int rear;
     int count;
-} CustomerQueue;
+} Kolejka;
 
 typedef struct
 {
-    Plate belt[MAX_BELT];
+    Talerz belt[MAX_BELT];
     int head;
     int tail;
     int count;
-} ConveyorBelt;
+} Tasma;
 
 // Globalne zmienne - teraz współdzielone
-CustomerQueue *customer_queue;
-ConveyorBelt *belt;
-Table *tables;
+Kolejka *customer_queue;
+Tasma *belt;
+Stolik *tables;
 int *total_customers;
 int *vip_count;
 int *manager_signal;           // Sygnał kierownika
@@ -75,7 +74,7 @@ void init_belt()
     belt->count = 0;
 }
 
-void add_to_belt(Plate p)
+void add_to_belt(Talerz p)
 {
     sem_wait(belt_sem);
     if (belt->count < P)
@@ -87,9 +86,9 @@ void add_to_belt(Plate p)
     sem_post(belt_sem);
 }
 
-Plate remove_from_belt()
+Talerz remove_from_belt()
 {
-    Plate p = {0, -1};
+    Talerz p = {0, -1};
     sem_wait(belt_sem);
     if (belt->count > 0)
     {
@@ -108,7 +107,7 @@ void init_queue()
     customer_queue->count = 0;
 }
 
-void enqueue(Group g)
+void enqueue(Grupa g)
 {
     sem_wait(queue_sem);
     if (customer_queue->count < MAX_QUEUE)
@@ -120,9 +119,9 @@ void enqueue(Group g)
     sem_post(queue_sem);
 }
 
-Group dequeue()
+Grupa dequeue()
 {
-    Group g = {0, 0, 0, 0};
+    Grupa g = {0, 0, 0, 0};
     sem_wait(queue_sem);
     if (customer_queue->count > 0)
     {
@@ -134,13 +133,12 @@ Group dequeue()
     return g;
 }
 
-// Procedury - bez pthread, jako funkcje dla procesów
 void client_process()
 {
     while (1)
     {
         sleep(rand() % 10);
-        Group g;
+        Grupa g;
         g.size = rand() % 4 + 1;
         g.is_vip = (rand() % 100 < 2) ? 1 : 0;
         g.has_children = rand() % 2;
@@ -156,7 +154,7 @@ void client_process()
                 if (tables[i].occupied == 0 && tables[i].capacity >= g.size)
                 {
                     tables[i].occupied = g.size;
-                    tables[i].group = g;
+                    tables[i].grupa = g;
                     break;
                 }
             }
@@ -176,7 +174,7 @@ void staff_process()
     {
         if (customer_queue->count > 0)
         {
-            Group g = dequeue();
+            Grupa g = dequeue();
             int assigned = 0;
             sem_wait(table_sem);
             for (int i = 0; i < MAX_TABLES; i++)
@@ -184,7 +182,7 @@ void staff_process()
                 if (tables[i].occupied == 0 && tables[i].capacity >= g.size)
                 {
                     tables[i].occupied = g.size;
-                    tables[i].group = g;
+                    tables[i].grupa = g;
                     assigned = 1;
                     fprintf(report, "Grupa %d osób przy stoliku %d.\n", g.size, i);
                     break;
@@ -205,7 +203,7 @@ void staff_process()
 
         for (int i = 0; i < speed; i++)
         {
-            Plate p;
+            Talerz p;
             p.price = (rand() % 3 + 1) * 10;
             p.for_table = -1;
             add_to_belt(p);
@@ -220,7 +218,7 @@ void chef_process()
     while (1)
     {
         sleep(5);
-        Plate p;
+        Talerz p;
         p.price = (rand() % 3 + 4) * 10;
         p.for_table = rand() % MAX_TABLES;
         add_to_belt(p);
@@ -260,16 +258,16 @@ int main()
     report = fopen("raport.txt", "w");
 
     // Tworzenie współdzielonej pamięci
-    int shm_queue = shmget(IPC_PRIVATE, sizeof(CustomerQueue), IPC_CREAT | 0666);
-    int shm_belt = shmget(IPC_PRIVATE, sizeof(ConveyorBelt), IPC_CREAT | 0666);
-    int shm_tables = shmget(IPC_PRIVATE, sizeof(Table) * MAX_TABLES, IPC_CREAT | 0666);
+    int shm_queue = shmget(IPC_PRIVATE, sizeof(Kolejka), IPC_CREAT | 0666);
+    int shm_belt = shmget(IPC_PRIVATE, sizeof(Tasma), IPC_CREAT | 0666);
+    int shm_tables = shmget(IPC_PRIVATE, sizeof(Stolik) * MAX_TABLES, IPC_CREAT | 0666);
     int shm_total = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
     int shm_vip = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
     int shm_signal = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
 
-    customer_queue = (CustomerQueue *)shmat(shm_queue, NULL, 0);
-    belt = (ConveyorBelt *)shmat(shm_belt, NULL, 0);
-    tables = (Table *)shmat(shm_tables, NULL, 0);
+    customer_queue = (Kolejka *)shmat(shm_queue, NULL, 0);
+    belt = (Tasma *)shmat(shm_belt, NULL, 0);
+    tables = (Stolik *)shmat(shm_tables, NULL, 0);
     total_customers = (int *)shmat(shm_total, NULL, 0);
     vip_count = (int *)shmat(shm_vip, NULL, 0);
     manager_signal = (int *)shmat(shm_signal, NULL, 0);
