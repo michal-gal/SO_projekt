@@ -89,7 +89,8 @@ int Tk;                 // Czas zamknięcia restauracji
 FILE *raport;           // Plik raportu
 
 // Funkcje pomocnicze - dostosuj do wskaźników
-void inicjuj_tasma() void inicjuj_tasma()
+
+void inicjuj_tasma()
 {
     tasma->przod = 0;
     tasma->tyl = 0;
@@ -99,7 +100,7 @@ void inicjuj_tasma() void inicjuj_tasma()
     tasma->licznik = 0;
 }
 
-void dodaj_do_tasma(Talerz p) void dodaj_do_tasma(Talerz p)
+void dodaj_do_tasma(Talerz p)
 {
     sem_wait(tasma_sem);
     if (tasma->licznik < P)
@@ -118,7 +119,6 @@ void dodaj_do_tasma(Talerz p) void dodaj_do_tasma(Talerz p)
 }
 
 Talerz usun_z_tasma()
-    Talerz usun_z_tasma()
 {
     Talerz p = {0, -1};
     sem_wait(tasma_sem);
@@ -138,7 +138,7 @@ Talerz usun_z_tasma()
     return p;
 }
 
-void inicjuj_kolejka() void inicjuj_kolejka()
+void inicjuj_kolejka()
 {
     kolejka_klientow->przod = 0;
     kolejka_klientow->tyl = 0;
@@ -148,7 +148,7 @@ void inicjuj_kolejka() void inicjuj_kolejka()
     kolejka_klientow->licznik = 0;
 }
 
-void zakolejkuj(Grupa g) void zakolejkuj(Grupa g)
+void zakolejkuj(Grupa g)
 {
     sem_wait(kolejka_sem);
     if (kolejka_klientow->licznik < MAX_KOLEJKA)
@@ -167,7 +167,6 @@ void zakolejkuj(Grupa g) void zakolejkuj(Grupa g)
 }
 
 Grupa wykolejkuj()
-    Grupa wykolejkuj()
 {
     Grupa g = {0, 0, 0, 0};
     sem_wait(kolejka_sem);
