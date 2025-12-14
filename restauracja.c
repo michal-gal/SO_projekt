@@ -21,16 +21,24 @@ typedef struct Grupa
     int VIP;
     int dzieci;
     int dorosli;
+    int wielkosc;
+    int VIP;
+    int dzieci;
+    int dorosli;
 } Grupa;
 
 typedef struct Talerz
 {
     int cena;
     int do_stolika;
+    int cena;
+    int do_stolika;
 } Talerz;
 
 typedef struct Stolik
 {
+    int zajety;
+    int pojemnosc;
     int zajety;
     int pojemnosc;
     Grupa grupa;
@@ -42,10 +50,18 @@ typedef struct
     int przod;
     int tyl;
     int licznik;
+    Grupa kolejka[MAX_KOLEJKA];
+    int przod;
+    int tyl;
+    int licznik;
 } Kolejka;
 
 typedef struct
 {
+    Talerz tasma[MAX_TASMA];
+    int przod;
+    int tyl;
+    int licznik;
     Talerz tasma[MAX_TASMA];
     int przod;
     int tyl;
@@ -73,68 +89,100 @@ int Tk;                 // Czas zamknięcia restauracji
 FILE *raport;           // Plik raportu
 
 // Funkcje pomocnicze - dostosuj do wskaźników
-void inicjuj_tasma()
+void inicjuj_tasma() void inicjuj_tasma()
 {
+    tasma->przod = 0;
+    tasma->tyl = 0;
+    tasma->licznik = 0;
     tasma->przod = 0;
     tasma->tyl = 0;
     tasma->licznik = 0;
 }
 
-void dodaj_do_tasma(Talerz p)
+void dodaj_do_tasma(Talerz p) void dodaj_do_tasma(Talerz p)
 {
     sem_wait(tasma_sem);
+    if (tasma->licznik < P)
+        sem_wait(tasma_sem);
     if (tasma->licznik < P)
     {
         tasma->tasma[tasma->tyl] = p;
         tasma->tyl = (tasma->tyl + 1) % MAX_TASMA;
         tasma->licznik++;
+        tasma->tasma[tasma->tyl] = p;
+        tasma->tyl = (tasma->tyl + 1) % MAX_TASMA;
+        tasma->licznik++;
     }
+    sem_post(tasma_sem);
     sem_post(tasma_sem);
 }
 
 Talerz usun_z_tasma()
+    Talerz usun_z_tasma()
 {
     Talerz p = {0, -1};
     sem_wait(tasma_sem);
+    if (tasma->licznik > 0)
+        sem_wait(tasma_sem);
     if (tasma->licznik > 0)
     {
         p = tasma->tasma[tasma->przod];
         tasma->przod = (tasma->przod + 1) % MAX_TASMA;
         tasma->licznik--;
+        p = tasma->tasma[tasma->przod];
+        tasma->przod = (tasma->przod + 1) % MAX_TASMA;
+        tasma->licznik--;
     }
+    sem_post(tasma_sem);
     sem_post(tasma_sem);
     return p;
 }
 
-void inicjuj_kolejka()
+void inicjuj_kolejka() void inicjuj_kolejka()
 {
+    kolejka_klientow->przod = 0;
+    kolejka_klientow->tyl = 0;
+    kolejka_klientow->licznik = 0;
     kolejka_klientow->przod = 0;
     kolejka_klientow->tyl = 0;
     kolejka_klientow->licznik = 0;
 }
 
-void zakolejkuj(Grupa g)
+void zakolejkuj(Grupa g) void zakolejkuj(Grupa g)
 {
     sem_wait(kolejka_sem);
+    if (kolejka_klientow->licznik < MAX_KOLEJKA)
+        sem_wait(kolejka_sem);
     if (kolejka_klientow->licznik < MAX_KOLEJKA)
     {
         kolejka_klientow->kolejka[kolejka_klientow->tyl] = g;
         kolejka_klientow->tyl = (kolejka_klientow->tyl + 1) % MAX_KOLEJKA;
         kolejka_klientow->licznik++;
+        kolejka_klientow->kolejka[kolejka_klientow->tyl] = g;
+        kolejka_klientow->tyl = (kolejka_klientow->tyl + 1) % MAX_KOLEJKA;
+        kolejka_klientow->licznik++;
     }
+    sem_post(kolejka_sem);
     sem_post(kolejka_sem);
 }
 
 Grupa wykolejkuj()
+    Grupa wykolejkuj()
 {
     Grupa g = {0, 0, 0, 0};
     sem_wait(kolejka_sem);
+    if (kolejka_klientow->licznik > 0)
+        sem_wait(kolejka_sem);
     if (kolejka_klientow->licznik > 0)
     {
         g = kolejka_klientow->kolejka[kolejka_klientow->przod];
         kolejka_klientow->przod = (kolejka_klientow->przod + 1) % MAX_KOLEJKA;
         kolejka_klientow->licznik--;
+        g = kolejka_klientow->kolejka[kolejka_klientow->przod];
+        kolejka_klientow->przod = (kolejka_klientow->przod + 1) % MAX_KOLEJKA;
+        kolejka_klientow->licznik--;
     }
+    sem_post(kolejka_sem);
     sem_post(kolejka_sem);
     return g;
 }
@@ -151,28 +199,38 @@ void klient_proces()
         g.VIP = (rand() % 100 < 2) ? 1 : 0;
         g.dzieci = rand() % 2;
         g.dorosli = g.dzieci ? rand() % 3 + 1 : 0;
+        g.wielkosc = rand() % 4 + 1;
+        g.VIP = (rand() % 100 < 2) ? 1 : 0;
+        g.dzieci = rand() % 2;
+        g.dorosli = g.dzieci ? rand() % 3 + 1 : 0;
 
         if (g.VIP)
-        {
-            (*vip_licznik)++;
-            fprintf(raport, "VIP grupa %d osób przybyła.\n", g.wielkosc);
-            sem_wait(kolejka_sem);
-            for (int i = 0; i < MAX_STOLIKI; i++)
+            if (g.VIP)
             {
-                if (stoly[i].zajety == 0 && stoly[i].pojemnosc >= g.wielkosc)
+                (*vip_licznik)++;
+                fprintf(raport, "VIP grupa %d osób przybyła.\n", g.wielkosc);
+                sem_wait(kolejka_sem);
+                for (int i = 0; i < MAX_STOLIKI; i++)
                 {
-                    stoly[i].zajety = g.wielkosc;
-                    stoly[i].grupa = g;
-                    break;
+                    if (stoly[i].zajety == 0 && stoly[i].pojemnosc >= g.wielkosc)
+                        if (stoly[i].zajety == 0 && stoly[i].pojemnosc >= g.wielkosc)
+                        {
+                            stoly[i].zajety = g.wielkosc;
+                            stoly[i].grupa = g;
+                            stoly[i].zajety = g.wielkosc;
+                            stoly[i].grupa = g;
+                            break;
+                        }
                 }
+                sem_post(kolejka_sem);
             }
-            sem_post(kolejka_sem);
-        }
-        else
-        {
-            zakolejkuj(g);
-            fprintf(raport, "Grupa %d osób w kolejce.\n", g.wielkosc);
-        }
+            else
+            {
+                zakolejkuj(g);
+                fprintf(raport, "Grupa %d osób w kolejce.\n", g.wielkosc);
+                zakolejkuj(g);
+                fprintf(raport, "Grupa %d osób w kolejce.\n", g.wielkosc);
+            }
     }
 }
 
@@ -181,27 +239,34 @@ void obsluga_proces()
     while (1)
     {
         if (kolejka_klientow->licznik > 0)
-        {
-            Grupa g = wykolejkuj();
-            int dolacz = 0;
-            sem_wait(kolejka_sem);
-            for (int i = 0; i < MAX_STOLIKI; i++)
+            if (kolejka_klientow->licznik > 0)
             {
-                if (stoly[i].zajety == 0 && stoly[i].pojemnosc >= g.wielkosc)
+                Grupa g = wykolejkuj();
+                int dolacz = 0;
+                sem_wait(kolejka_sem);
+                for (int i = 0; i < MAX_STOLIKI; i++)
                 {
-                    stoly[i].zajety = g.wielkosc;
-                    stoly[i].grupa = g;
-                    dolacz = 1;
-                    fprintf(raport, "Grupa %d osób przy stoliku %d.\n", g.wielkosc, i);
-                    break;
+                    if (stoly[i].zajety == 0 && stoly[i].pojemnosc >= g.wielkosc)
+                        if (stoly[i].zajety == 0 && stoly[i].pojemnosc >= g.wielkosc)
+                        {
+                            stoly[i].zajety = g.wielkosc;
+                            stoly[i].grupa = g;
+                            dolacz = 1;
+                            fprintf(raport, "Grupa %d osób przy stoliku %d.\n", g.wielkosc, i);
+                            stoly[i].zajety = g.wielkosc;
+                            stoly[i].grupa = g;
+                            dolacz = 1;
+                            fprintf(raport, "Grupa %d osób przy stoliku %d.\n", g.wielkosc, i);
+                            break;
+                        }
+                }
+                sem_post(kolejka_sem);
+                if (!dolacz)
+                {
+                    fprintf(raport, "Brak miejsca dla grupy %d osób.\n", g.wielkosc);
+                    fprintf(raport, "Brak miejsca dla grupy %d osób.\n", g.wielkosc);
                 }
             }
-            sem_post(kolejka_sem);
-            if (!dolacz)
-            {
-                fprintf(raport, "Brak miejsca dla grupy %d osób.\n", g.wielkosc);
-            }
-        }
 
         int speed = 1;
         if (*sygnal_kierownika == 1)
@@ -212,6 +277,10 @@ void obsluga_proces()
         for (int i = 0; i < speed; i++)
         {
             Talerz p;
+            p.cena = (rand() % 3 + 1) * 10;
+            p.do_stolika = -1;
+            dodaj_do_tasma(p);
+            fprintf(raport, "Dodano talerzyk %d zł na taśmę.\n", p.cena);
             p.cena = (rand() % 3 + 1) * 10;
             p.do_stolika = -1;
             dodaj_do_tasma(p);
@@ -231,6 +300,10 @@ void kucharz_proces()
         p.do_stolika = rand() % MAX_STOLIKI;
         dodaj_do_tasma(p);
         fprintf(raport, "Specjalne danie %d zł dla stolika %d.\n", p.cena, p.do_stolika);
+        p.cena = (rand() % 3 + 4) * 10;
+        p.do_stolika = rand() % MAX_STOLIKI;
+        dodaj_do_tasma(p);
+        fprintf(raport, "Specjalne danie %d zł dla stolika %d.\n", p.cena, p.do_stolika);
     }
 }
 
@@ -245,6 +318,7 @@ void kierownik_proces()
             sem_wait(kolejka_sem);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
+                stoly[i].zajety = 0;
                 stoly[i].zajety = 0;
             }
             sem_wait(kolejka_sem);
@@ -264,8 +338,12 @@ int main()
 {
     srand(time(NULL));
     raport = fopen("raport.txt", "w");
+    raport = fopen("raport.txt", "w");
 
     // Tworzenie współdzielonej pamięci
+    int shm_kolejka = shmget(IPC_PRIVATE, sizeof(Kolejka), IPC_CREAT | 0666);
+    int shm_tasma = shmget(IPC_PRIVATE, sizeof(Tasma), IPC_CREAT | 0666);
+    int shm_stoly = shmget(IPC_PRIVATE, sizeof(Stolik) * MAX_STOLIKI, IPC_CREAT | 0666);
     int shm_kolejka = shmget(IPC_PRIVATE, sizeof(Kolejka), IPC_CREAT | 0666);
     int shm_tasma = shmget(IPC_PRIVATE, sizeof(Tasma), IPC_CREAT | 0666);
     int shm_stoly = shmget(IPC_PRIVATE, sizeof(Stolik) * MAX_STOLIKI, IPC_CREAT | 0666);
@@ -303,12 +381,16 @@ int main()
     int idx = 0;
     for (int i = 0; i < X1; i++)
         stoly[idx++].pojemnosc = 1;
+    stoly[idx++].pojemnosc = 1;
     for (int i = 0; i < X2; i++)
         stoly[idx++].pojemnosc = 2;
+    stoly[idx++].pojemnosc = 2;
     for (int i = 0; i < X3; i++)
         stoly[idx++].pojemnosc = 3;
+    stoly[idx++].pojemnosc = 3;
     for (int i = 0; i < X4; i++)
         stoly[idx++].pojemnosc = 4;
+    stoly[idx++].pojemnosc = 4;
 
     // Tworzenie procesów
     pid_t pid_klient = fork(); // Proces klienta
@@ -350,6 +432,7 @@ int main()
 
     // Podsumowanie
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
+    fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
 
     // Czyszczenie
     shmdt(kolejka_klientow);
@@ -359,7 +442,15 @@ int main()
     shmdt(stoly);
     shmctl(shm_stoly, IPC_RMID, NULL);
     shmdt(wszyscy_klienci);
+    shmdt(kolejka_klientow);
+    shmctl(shm_kolejka, IPC_RMID, NULL);
+    shmdt(tasma);
+    shmctl(shm_tasma, IPC_RMID, NULL);
+    shmdt(stoly);
+    shmctl(shm_stoly, IPC_RMID, NULL);
+    shmdt(wszyscy_klienci);
     shmctl(shm_total, IPC_RMID, NULL);
+    shmdt(vip_licznik);
     shmdt(vip_licznik);
     shmctl(shm_vip, IPC_RMID, NULL);
     shmdt(signal);
@@ -371,6 +462,7 @@ int main()
     sem_close(kolejka_sem);
     sem_unlink("/kolejka_sem");
 
+    fclose(raport);
     fclose(raport);
     return 0;
 }
