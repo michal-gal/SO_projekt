@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <sys/sem.h>
 #include "procesy.h"
 
 // Deklaracje zmiennych współdzielonych (z restauracja.c)
@@ -17,69 +18,75 @@ extern sem_t *tasma_sem;
 extern int P, X1, X2, X3, X4, N, Tp, Tk;
 extern FILE *raport;
 
-void inicjuj_kolejka()
+static struct sembuf P_OP = {0, -1, 0};
+static struct sembuf V_OP = {0, 1, 0};
+
+static void sem_p(int semid) { semop(semid, &P_OP, 1); }
+static void sem_v(int semid) { semop(semid, &V_OP, 1); }
+
+void inicjuj_kolejka() // Inicjalizacja kolejki klientów
 {
     kolejka_klientow->przod = 0;
     kolejka_klientow->tyl = 0;
     kolejka_klientow->licznik = 0;
 }
 
-void inicjuj_tasma()
+void inicjuj_tasma() // Inicjalizacja taśmy z daniami
 {
     tasma->przod = 0;
     tasma->tyl = 0;
     tasma->licznik = 0;
 }
 
-void dodaj_do_kolejki(Grupa g)
+void dodaj_do_kolejki(Grupa g) // Dodanie grupy do kolejki
 {
-    sem_wait(kolejka_sem);
+    sem_p(kolejka_sem_id);
     if (kolejka_klientow->licznik < 500)
     {
         kolejka_klientow->kolejka[kolejka_klientow->tyl] = g;
         kolejka_klientow->tyl = (kolejka_klientow->tyl + 1) % 500;
         kolejka_klientow->licznik++;
     }
-    sem_post(kolejka_sem);
+    sem_v(kolejka_sem_id);
 }
 
 Grupa usun_z_kolejki()
 {
     Grupa g = {0, 0, 0, 0};
-    sem_wait(kolejka_sem);
+    sem_p(kolejka_sem_id);
     if (kolejka_klientow->licznik > 0)
     {
         g = kolejka_klientow->kolejka[kolejka_klientow->przod];
         kolejka_klientow->przod = (kolejka_klientow->przod + 1) % 500;
         kolejka_klientow->licznik--;
     }
-    sem_post(kolejka_sem);
+    sem_v(kolejka_sem_id);
     return g;
 }
 
 void dodaj_do_tasmy(Talerz t)
 {
-    sem_wait(tasma_sem);
+    sem_p(tasma_sem_id);
     if (tasma->licznik < P)
     {
         tasma->tasma[tasma->tyl] = t;
         tasma->tyl = (tasma->tyl + 1) % 500;
         tasma->licznik++;
     }
-    sem_post(tasma_sem);
+    sem_v(tasma_sem_id);
 }
 
 Talerz usun_z_tasmy()
 {
     Talerz t = {0, -1};
-    sem_wait(tasma_sem);
+    sem_p(tasma_sem_id);
     if (tasma->licznik > 0)
     {
         t = tasma->tasma[tasma->przod];
         tasma->przod = (tasma->przod + 1) % 500;
         tasma->licznik--;
     }
-    sem_post(tasma_sem);
+    sem_v(tasma_sem_id);
     return t;
 }
 

@@ -9,8 +9,8 @@ int *wszyscy_klienci;
 int *vip_licznik;
 int *sygnal_kierownika;
 
-sem_t *kolejka_sem;
-sem_t *tasma_sem;
+int kolejka_sem_id;
+int tasma_sem_id;
 
 int P, X1, X2, X3, X4, N, Tp, Tk;
 FILE *raport;

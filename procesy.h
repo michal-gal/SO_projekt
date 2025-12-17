@@ -50,8 +50,8 @@ extern int *wszyscy_klienci;
 extern int *vip_licznik;
 extern int *sygnal_kierownika;
 
-extern sem_t *kolejka_sem;
-extern sem_t *tasma_sem;
+extern int kolejka_sem_id;
+extern int tasma_sem_id;
 
 extern int P, X1, X2, X3, X4, N, Tp, Tk;
 extern FILE *raport;

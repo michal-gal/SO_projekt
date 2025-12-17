@@ -8,6 +8,7 @@
 #include <semaphore.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <sys/sem.h>
 #include "procesy.h"
 
 #define MAX_KOLEJKA 500
@@ -47,8 +48,18 @@ int main()
     vip_licznik = (int *)shmat(shm_vip, NULL, 0);
     sygnal_kierownika = (int *)shmat(shm_signal, NULL, 0);
 
-    kolejka_sem = sem_open("/kolejka_sem", O_CREAT, 0644, 1);
-    tasma_sem = sem_open("/tasma_sem", O_CREAT, 0644, 1);
+    // semafory System V
+    kolejka_sem_id = semget(IPC_PRIVATE, 1, IPC_CREAT | 0666);
+    tasma_sem_id = semget(IPC_PRIVATE, 1, IPC_CREAT | 0666);
+    union semun
+    {
+        int val;
+        struct semid_ds *buf;
+        unsigned short *array;
+    } arg;
+    arg.val = 1;
+    semctl(kolejka_sem_id, 0, SETVAL, arg);
+    semctl(tasma_sem_id, 0, SETVAL, arg);
 
     inicjuj_kolejka();
     inicjuj_tasma();
@@ -82,22 +93,21 @@ int main()
 
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
 
-    shmdt(kolejka_klientow);             // Odłączanie pamięci współdzielonej
-    shmctl(shm_kolejka, IPC_RMID, NULL); // Usuwanie segmentu pamięci
-    shmdt(tasma);                        // Odłączanie pamięci współdzielonej
-    shmctl(shm_tasma, IPC_RMID, NULL);   // Usuwanie segmentu pamięci
-    shmdt(stoly);                        // Odłączanie pamięci współdzielonej
-    shmctl(shm_stoly, IPC_RMID, NULL);   // Usuwanie segmentu pamięci
-    shmdt(wszyscy_klienci);              // Odłączanie pamięci współdzielonej
-    shmctl(shm_total, IPC_RMID, NULL);   // Usuwanie segmentu pamięci
-    shmdt(vip_licznik);                  // Odłączanie pamięci współdzielonej
-    shmctl(shm_vip, IPC_RMID, NULL);     // Usuwanie segmentu pamięci
-    shmdt(sygnal_kierownika);            // Odłączanie pamięci współdzielonej
-    shmctl(shm_signal, IPC_RMID, NULL);  // Usuwanie segmentu pamięci
-    sem_close(kolejka_sem);              // Zamknięcie semafora
-    sem_unlink("/kolejka_sem");          // Usunięcie semafora
-    sem_close(tasma_sem);                // Zamknięcie semafora
-    sem_unlink("/tasma_sem");            // Usunięcie semafora
+    // sprzątanie
+    shmdt(kolejka_klientow);
+    shmctl(shm_kolejka, IPC_RMID, NULL);
+    shmdt(tasma);
+    shmctl(shm_tasma, IPC_RMID, NULL);
+    shmdt(stoly);
+    shmctl(shm_stoly, IPC_RMID, NULL);
+    shmdt(wszyscy_klienci);
+    shmctl(shm_total, IPC_RMID, NULL);
+    shmdt(vip_licznik);
+    shmctl(shm_vip, IPC_RMID, NULL);
+    shmdt(sygnal_kierownika);
+    shmctl(shm_signal, IPC_RMID, NULL);
+    semctl(kolejka_sem_id, 0, IPC_RMID);
+    semctl(tasma_sem_id, 0, IPC_RMID);
 
     fclose(raport);
     return 0;
