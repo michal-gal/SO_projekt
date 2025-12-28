@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -g -pthread
 TARGET = restauracja
-SOURCES = restauracja.c procesy.c globals.c
+SOURCES = restauracja.c procesy.c
 HEADERS = procesy.h
 OBJECTS = $(SOURCES:.c=.o)
 
@@ -16,8 +16,7 @@ restauracja.o: restauracja.c $(HEADERS)
 procesy.o: procesy.c $(HEADERS)
 	$(CC) $(CFLAGS) -c procesy.c
 
-globals.o: globals.c $(HEADERS)
-	$(CC) $(CFLAGS) -c globals.c
+ 
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)
