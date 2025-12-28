@@ -11,7 +11,7 @@
 #include <sys/sem.h>
 #include "procesy.h"
 
-// Definicje zmiennych globalnych (przeniesione z globals.c)
+// Definicje zmiennych globalnych
 Kolejka *kolejka_klientow;
 Tasma *tasma;
 Stolik *stoly;
@@ -28,7 +28,7 @@ FILE *raport;
 int main()
 {
     pid_t pid;
-    srand(time(NULL));
+    srand((unsigned int)time(NULL));
     raport = fopen("raport.txt", "w");
     if (!raport)
     {
@@ -78,16 +78,20 @@ int main()
     int idx = 0;
     for (int i = 0; i < X1; i++)
         stoly[idx++].pojemnosc = 1;
+    printf("Utworzono %d stolików 1-osobowych.\n", X1);
     for (int i = 0; i < X2; i++)
         stoly[idx++].pojemnosc = 2;
+    printf("Utworzono %d stolików 2-osobowych.\n", X2);
     for (int i = 0; i < X3; i++)
         stoly[idx++].pojemnosc = 3;
+    printf("Utworzono %d stolików 3-osobowych.\n", X3);
     for (int i = 0; i < X4; i++)
         stoly[idx++].pojemnosc = 4;
+    printf("Utworzono %d stolików 4-osobowych.\n", X4);
 
-    // Tworzenie procesów (dokładnie 4 dzieci: klient, obsługa, kucharz, kierownik)
-    pid_t children[4];
-    int child_count = 0;
+    // Tworzenie 4 procesów potomnych: klient, obsługa, kucharz, kierownik
+    pid_t proces[4];
+    int licznik_procesow = 0;
 
     pid = fork(); // proces klienta
     if (pid < 0)
@@ -97,12 +101,13 @@ int main()
     }
     else if (pid == 0)
     {
+        printf("Rozpoczynanie procesu klienta\n");
         klient_proces();
         _exit(0);
     }
     else
     {
-        children[child_count++] = pid;
+        proces[licznik_procesow++] = pid;
     }
 
     pid = fork(); // proces obsługi
@@ -113,12 +118,13 @@ int main()
     }
     else if (pid == 0)
     {
+        printf("Rozpoczynanie procesu obsługi\n");
         obsluga_proces();
         _exit(0);
     }
     else
     {
-        children[child_count++] = pid;
+        proces[licznik_procesow++] = pid;
     }
 
     pid = fork(); // proces kucharza
@@ -129,12 +135,13 @@ int main()
     }
     else if (pid == 0)
     {
+        printf("Rozpoczynanie procesu kucharza\n");
         kucharz_proces();
         _exit(0);
     }
     else
     {
-        children[child_count++] = pid;
+        proces[licznik_procesow++] = pid;
     }
 
     pid = fork(); // proces kierownika
@@ -145,24 +152,25 @@ int main()
     }
     else if (pid == 0)
     {
+        printf("Rozpoczynanie procesu kierownika\n");
         kierownik_proces();
         _exit(0);
     }
     else
     {
-        children[child_count++] = pid;
+        proces[licznik_procesow++] = pid;
     }
 
-    sleep(30); // Czas działania restauracji
+    sleep(300); // Czas działania restauracji
 
-    // zakończenie pracy dzieci i zebranie ich
-    for (int i = 0; i < child_count; i++)
+    // zakończenie pracy procesów i zebranie ich
+    for (int i = 0; i < licznik_procesow; i++)
     {
-        kill(children[i], SIGTERM);
+        kill(proces[i], SIGTERM);
     }
-    for (int i = 0; i < child_count; i++)
+    for (int i = 0; i < licznik_procesow; i++)
     {
-        waitpid(children[i], NULL, 0);
+        waitpid(proces[i], NULL, 0);
     }
 
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
