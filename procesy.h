@@ -12,14 +12,14 @@
 typedef struct
 {
     int rozmiar;
-    int is_vip;
-    int ma_dzieci;
+    int vip;
+    int liczba_dzieci;
     int opiekunowie;
 } Grupa;
 
 typedef struct
 {
-    Grupa kolejka[500];
+    Grupa kolejka[MAX_KOLEJKA];
     int przod, tyl, licznik;
 } Kolejka;
 
@@ -31,7 +31,7 @@ typedef struct
 
 typedef struct
 {
-    Talerz tasma[500];
+    Talerz tasma[MAX_TASMA];
     int przod, tyl, licznik;
 } Tasma;
 

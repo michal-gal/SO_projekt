@@ -13,8 +13,6 @@ extern Stolik *stoly;
 extern int *wszyscy_klienci;
 extern int *vip_licznik;
 extern int *sygnal_kierownika;
-extern sem_t *kolejka_sem;
-extern sem_t *tasma_sem;
 extern int P, X1, X2, X3, X4, N, Tp, Tk;
 extern FILE *raport;
 
@@ -41,10 +39,10 @@ void inicjuj_tasma() // Inicjalizacja taśmy z daniami
 void dodaj_do_kolejki(Grupa g) // Dodanie grupy do kolejki
 {
     sem_p(kolejka_sem_id);
-    if (kolejka_klientow->licznik < 500)
+    if (kolejka_klientow->licznik < MAX_KOLEJKA)
     {
         kolejka_klientow->kolejka[kolejka_klientow->tyl] = g;
-        kolejka_klientow->tyl = (kolejka_klientow->tyl + 1) % 500;
+        kolejka_klientow->tyl = (kolejka_klientow->tyl + 1) % MAX_KOLEJKA;
         kolejka_klientow->licznik++;
     }
     sem_v(kolejka_sem_id);
@@ -57,7 +55,7 @@ Grupa usun_z_kolejki()
     if (kolejka_klientow->licznik > 0)
     {
         g = kolejka_klientow->kolejka[kolejka_klientow->przod];
-        kolejka_klientow->przod = (kolejka_klientow->przod + 1) % 500;
+        kolejka_klientow->przod = (kolejka_klientow->przod + 1) % MAX_KOLEJKA;
         kolejka_klientow->licznik--;
     }
     sem_v(kolejka_sem_id);
@@ -67,10 +65,10 @@ Grupa usun_z_kolejki()
 void dodaj_do_tasmy(Talerz t)
 {
     sem_p(tasma_sem_id);
-    if (tasma->licznik < P)
+    if (tasma->licznik < MAX_TASMA)
     {
         tasma->tasma[tasma->tyl] = t;
-        tasma->tyl = (tasma->tyl + 1) % 500;
+        tasma->tyl = (tasma->tyl + 1) % MAX_TASMA;
         tasma->licznik++;
     }
     sem_v(tasma_sem_id);
@@ -83,7 +81,7 @@ Talerz usun_z_tasmy()
     if (tasma->licznik > 0)
     {
         t = tasma->tasma[tasma->przod];
-        tasma->przod = (tasma->przod + 1) % 500;
+        tasma->przod = (tasma->przod + 1) % MAX_TASMA;
         tasma->licznik--;
     }
     sem_v(tasma_sem_id);
@@ -97,11 +95,11 @@ void klient_proces()
         sleep(rand() % 10 + 1);
         Grupa g;
         g.rozmiar = rand() % 4 + 1;
-        g.is_vip = (rand() % 100 < 2) ? 1 : 0;
-        g.ma_dzieci = rand() % 2;
-        g.opiekunowie = g.ma_dzieci ? rand() % 3 + 1 : 0;
+        g.vip = (rand() % 100 < 2) ? 1 : 0;
+        g.liczba_dzieci = rand() % 2; // 0 lub 1 dziecko dla prostoty
+        g.opiekunowie = g.liczba_dzieci ? rand() % 3 + 1 : 0;
 
-        if (g.is_vip)
+        if (g.vip)
         {
             (*vip_licznik)++;
             fprintf(raport, "VIP grupa %d osób przybyła.\n", g.rozmiar);
