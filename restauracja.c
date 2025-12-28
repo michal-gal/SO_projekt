@@ -12,11 +12,17 @@ int *restauracja_otwarta;
 // ====== MAIN ======
 int main()
 {
-    srand(time(NULL));
-    shm_id = shmget(IPC_PRIVATE, sizeof(Kolejka) + sizeof(Stolik) * MAX_STOLIKI + sizeof(Tasma) + sizeof(Statystyki) * 2 + sizeof(int) * 2, IPC_CREAT | 0666);
-    void *mem = shmat(shm_id, NULL, 0);
 
-    kolejka = mem;
+    srand(time(NULL));
+    int bufor = sizeof(Kolejka) +              //
+                sizeof(Stolik) * MAX_STOLIKI + //
+                sizeof(Tasma) +                //
+                sizeof(Statystyki) * 2 +       //
+                sizeof(int) * 2;
+    shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0666); // utworzenie pamięci współdzielonej
+    void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);   // dołączenie pamięci współdzielonej
+
+    kolejka = pamiec_wspoldzielona;
     stoliki = (void *)(kolejka + 1);
     tasma = (void *)(stoliki + MAX_STOLIKI);
     kuchnia = (void *)(tasma + 1);
@@ -24,8 +30,8 @@ int main()
     sygnal_kierownika = (void *)(kasa + 1);
     restauracja_otwarta = sygnal_kierownika + 1;
 
-    sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0666);
-    semctl(sem_id, SEM_KOLEJKA, SETVAL, 1);
+    sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0666); // utworzenie zestawu semaforów
+    semctl(sem_id, SEM_KOLEJKA, SETVAL, 1);            // inicjalizacja semaforów
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
     semctl(sem_id, SEM_TASMA, SETVAL, 1);
 
@@ -37,14 +43,60 @@ int main()
 
     *restauracja_otwarta = 1;
 
-    if (!fork())
+    pid_t pid = fork();
+    if (pid == 0)
+    {
         klient();
-    if (!fork())
+    }
+    else if (pid == -1)
+    {
+        perror("fork failed");
+        exit(1);
+    }
+
+    pid = fork();
+    if (pid == 0)
+    {
+        klient();
+    }
+    else if (pid == -1)
+    {
+        perror("fork failed");
+        exit(1);
+    }
+
+    pid = fork();
+    if (pid == 0)
+    {
         obsluga();
-    if (!fork())
+    }
+    else if (pid == -1)
+    {
+        perror("fork failed");
+        exit(1);
+    }
+
+    pid = fork();
+    if (pid == 0)
+    {
         kucharz();
-    if (!fork())
+    }
+    else if (pid == -1)
+    {
+        perror("fork failed");
+        exit(1);
+    }
+
+    pid = fork();
+    if (pid == 0)
+    {
         kierownik();
+    }
+    else if (pid == -1)
+    {
+        perror("fork failed");
+        exit(1);
+    }
 
     sleep(CZAS_PRACY);
     *restauracja_otwarta = 0;

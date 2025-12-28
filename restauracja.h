@@ -1,6 +1,8 @@
 #ifndef RESTAURACJA_H
 #define RESTAURACJA_H
 
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -52,7 +54,8 @@ typedef struct
 
 typedef struct
 {
-    int p10, p15, p20;
+    int p10;
+    int p15, p20;
     int p40, p50, p60;
     int suma;
 } Statystyki;
