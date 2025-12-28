@@ -11,29 +11,30 @@
 #include <sys/sem.h>
 #include "procesy.h"
 
-#define MAX_KOLEJKA 500
-#define MAX_TASMA 500
-#define MAX_STOLIKI 100
+// Definicje zmiennych globalnych (przeniesione z globals.c)
+Kolejka *kolejka_klientow;
+Tasma *tasma;
+Stolik *stoly;
+int *wszyscy_klienci;
+int *vip_licznik;
+int *sygnal_kierownika;
 
-// Deklaracje zmiennych - definicje są w globals.c
-extern Kolejka *kolejka_klientow;
-extern Tasma *tasma;
-extern Stolik *stoly;
-extern int *wszyscy_klienci;
-extern int *vip_licznik;
-extern int *sygnal_kierownika;
+int kolejka_sem_id;
+int tasma_sem_id;
 
-extern sem_t *kolejka_sem;
-extern sem_t *tasma_sem;
-
-extern int P, X1, X2, X3, X4, N, Tp, Tk;
-extern FILE *raport;
+int P, X1, X2, X3, X4, N, Tp, Tk;
+FILE *raport;
 
 int main()
 {
+    pid_t pid;
     srand(time(NULL));
     raport = fopen("raport.txt", "w");
-
+    if (!raport)
+    {
+        perror("fopen raport.txt");
+        exit(EXIT_FAILURE);
+    }
 
     // pamięć współdzielona
     int shm_kolejka = shmget(IPC_PRIVATE, sizeof(Kolejka), IPC_CREAT | 0666);
@@ -42,7 +43,6 @@ int main()
     int shm_total = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
     int shm_vip = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
     int shm_signal = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
-
 
     // mapowanie pamięci współdzielonej
     kolejka_klientow = (Kolejka *)shmat(shm_kolejka, NULL, 0);
@@ -85,17 +85,85 @@ int main()
     for (int i = 0; i < X4; i++)
         stoly[idx++].pojemnosc = 4;
 
-    // Tworzenie procesów
-    if (!fork()) //
-        klient_proces();
-    if (!fork())
-        obsluga_proces();
-    if (!fork())
-        kucharz_proces();
-    if (!fork())
-        kierownik_proces();
+    // Tworzenie procesów (dokładnie 4 dzieci: klient, obsługa, kucharz, kierownik)
+    pid_t children[4];
+    int child_count = 0;
 
-    sleep(300); // Czas działania restauracji
+    pid = fork(); // proces klienta
+    if (pid < 0)
+    {
+        perror("fork - klient_proces");
+        exit(EXIT_FAILURE);
+    }
+    else if (pid == 0)
+    {
+        klient_proces();
+        _exit(0);
+    }
+    else
+    {
+        children[child_count++] = pid;
+    }
+
+    pid = fork(); // proces obsługi
+    if (pid < 0)
+    {
+        perror("fork - obsluga_proces");
+        exit(EXIT_FAILURE);
+    }
+    else if (pid == 0)
+    {
+        obsluga_proces();
+        _exit(0);
+    }
+    else
+    {
+        children[child_count++] = pid;
+    }
+
+    pid = fork(); // proces kucharza
+    if (pid < 0)
+    {
+        perror("fork - kucharz_proces");
+        exit(EXIT_FAILURE);
+    }
+    else if (pid == 0)
+    {
+        kucharz_proces();
+        _exit(0);
+    }
+    else
+    {
+        children[child_count++] = pid;
+    }
+
+    pid = fork(); // proces kierownika
+    if (pid < 0)
+    {
+        perror("fork - kierownik_proces");
+        exit(EXIT_FAILURE);
+    }
+    else if (pid == 0)
+    {
+        kierownik_proces();
+        _exit(0);
+    }
+    else
+    {
+        children[child_count++] = pid;
+    }
+
+    sleep(30); // Czas działania restauracji
+
+    // zakończenie pracy dzieci i zebranie ich
+    for (int i = 0; i < child_count; i++)
+    {
+        kill(children[i], SIGTERM);
+    }
+    for (int i = 0; i < child_count; i++)
+    {
+        waitpid(children[i], NULL, 0);
+    }
 
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
 
