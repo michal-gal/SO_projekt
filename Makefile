@@ -1,14 +1,15 @@
 CC = gcc
-CFLAGS = -Wall -g -pthread
+CFLAGS = -Wall -g
+LDFLAGS = -pthread
 TARGET = restauracja
-SOURCES = restauracja.c procesy.c
-HEADERS = procesy.h
+SOURCES = restauracja.c procesy.c pomocnicze.c 
+HEADERS = restauracja.h 
 OBJECTS = $(SOURCES:.c=.o)
 
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $(TARGET) $(OBJECTS)
 
 restauracja.o: restauracja.c $(HEADERS)
 	$(CC) $(CFLAGS) -c restauracja.c
@@ -16,8 +17,8 @@ restauracja.o: restauracja.c $(HEADERS)
 procesy.o: procesy.c $(HEADERS)
 	$(CC) $(CFLAGS) -c procesy.c
 
- 
-
+pomocnicze.o: pomocnicze.c $(HEADERS)
+	$(CC) $(CFLAGS) -c pomocnicze.c
 clean:
 	rm -f $(OBJECTS) $(TARGET)
 
