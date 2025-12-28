@@ -34,6 +34,8 @@ int main()
     srand(time(NULL));
     raport = fopen("raport.txt", "w");
 
+
+    // pamięć współdzielona
     int shm_kolejka = shmget(IPC_PRIVATE, sizeof(Kolejka), IPC_CREAT | 0666);
     int shm_tasma = shmget(IPC_PRIVATE, sizeof(Tasma), IPC_CREAT | 0666);
     int shm_stoly = shmget(IPC_PRIVATE, sizeof(Stolik) * MAX_STOLIKI, IPC_CREAT | 0666);
@@ -41,6 +43,8 @@ int main()
     int shm_vip = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
     int shm_signal = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
 
+
+    // mapowanie pamięci współdzielonej
     kolejka_klientow = (Kolejka *)shmat(shm_kolejka, NULL, 0);
     tasma = (Tasma *)shmat(shm_tasma, NULL, 0);
     stoly = (Stolik *)shmat(shm_stoly, NULL, 0);
@@ -70,6 +74,7 @@ int main()
     N = X1 + 2 * X2 + 3 * X3 + 4 * X4;
     P = 1000;
 
+    // Inicjalizacja stolików
     int idx = 0;
     for (int i = 0; i < X1; i++)
         stoly[idx++].pojemnosc = 1;
@@ -80,6 +85,7 @@ int main()
     for (int i = 0; i < X4; i++)
         stoly[idx++].pojemnosc = 4;
 
+    // Tworzenie procesów
     if (!fork()) //
         klient_proces();
     if (!fork())
@@ -89,7 +95,7 @@ int main()
     if (!fork())
         kierownik_proces();
 
-    sleep(300);
+    sleep(300); // Czas działania restauracji
 
     fprintf(raport, "Podsumowanie: Taśma ma %d talerzyków.\n", tasma->licznik);
 
