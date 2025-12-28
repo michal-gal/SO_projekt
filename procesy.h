@@ -42,7 +42,7 @@ typedef struct
     Grupa grupa;
 } Stolik;
 
-// Deklaracje zmiennych globalnych (definicje w globals.c)
+// Deklaracje zmiennych globalnych
 extern Kolejka *kolejka_klientow;
 extern Tasma *tasma;
 extern Stolik *stoly;
