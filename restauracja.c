@@ -1,23 +1,23 @@
 #include "restauracja.h"
 
 // ====== ZMIENNE GLOBALNE ======
-int shm_id, sem_id;
-Kolejka *kolejka;
-Stolik *stoliki;
-Tasma *tasma;
-Statystyki *kuchnia, *kasa;
-int *sygnal_kierownika;
-int *restauracja_otwarta;
+int shm_id, sem_id;                // ID pamięci współdzielonej i semaforów
+struct Kolejka *kolejka;           // wskaźnik na kolejkę
+struct Stolik *stoliki;            // wskaźnik na tablicę stolików
+struct Tasma *tasma;               // wskaźnik na taśmę
+struct Statystyki *kuchnia, *kasa; // wskaźniki na statystyki kuchni i kasy
+int *sygnal_kierownika;            // wskaźnik na sygnał kierownika
+int *restauracja_otwarta;          // wskaźnik na stan restauracji
 
 // ====== MAIN ======
 int main()
 {
 
     srand(time(NULL));
-    int bufor = sizeof(Kolejka) +              //
-                sizeof(Stolik) * MAX_STOLIKI + //
-                sizeof(Tasma) +                //
-                sizeof(Statystyki) * 2 +       //
+    int bufor = sizeof(struct Kolejka) +              //
+                sizeof(struct Stolik) * MAX_STOLIKI + //
+                sizeof(struct Tasma) +                //
+                sizeof(struct Statystyki) * 2 +       //
                 sizeof(int) * 2;
     shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0666); // utworzenie pamięci współdzielonej
     void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);   // dołączenie pamięci współdzielonej
@@ -35,7 +35,7 @@ int main()
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
     semctl(sem_id, SEM_TASMA, SETVAL, 1);
 
-    for (int i = 0; i < MAX_STOLIKI; i++)
+    for (int i = 0; i < MAX_STOLIKI; i++) // inicjalizacja stolików
     {
         stoliki[i].pojemnosc = (i % 4) + 1;
         stoliki[i].zajety = 0;

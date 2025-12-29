@@ -1,8 +1,6 @@
 #ifndef RESTAURACJA_H
 #define RESTAURACJA_H
 
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -13,9 +11,22 @@
 #include <signal.h>
 
 // ====== CONSTANTS ======
-#define MAX_STOLIKI 20
-#define MAX_KOLEJKA 50
-#define MAX_TASMA 100
+#define X1 40
+#define X2 30
+#define X3 20
+#define X4 10
+#define p15 15
+#define p20 20
+#define p40 40
+#define p50 50
+#define p60 60
+#define CENY_DAN [6] = {p15, p20, p40, p50, p60}
+#define ILOSC_STOLIKOW [4] = {X1, X2, X3, X4}
+#define LADA 50
+#define MAX_OSOBY (LADA + X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4)
+#define MAX_STOLIKI (LADA + X1 + X2 + X3 + X4)
+#define MAX_KOLEJKA 500
+#define MAX_TASMA 500
 #define CZAS_PRACY 30
 
 // ====== SEMAPHORE IDS ======
@@ -24,48 +35,48 @@
 #define SEM_TASMA 2
 
 // ====== STRUCTURES ======
-typedef struct
+struct Grupa
 {
     int osoby;
     int dzieci;
     int dorosli;
     int vip;
     time_t wejscie;
-} Grupa;
+    int pobrane_dania[6]; // liczba pobranych dań
+};
 
-typedef struct
+struct Kolejka
 {
-    Grupa q[MAX_KOLEJKA];
+    struct Grupa q[MAX_KOLEJKA];
     int przod, tyl, ilosc;
-} Kolejka;
+};
 
-typedef struct
+struct Stolik
 {
+    int numer_stolika;
     int pojemnosc;
     int zajety;
-    Grupa grupa;
-} Stolik;
+    struct Grupa grupa;
+};
 
-typedef struct
+struct Tasma
 {
     int talerze[MAX_TASMA];
-    int ilosc;
-} Tasma;
+    int ilosc; // liczba talerzy na taśmie
+};
 
-typedef struct
+struct Statystyki
 {
-    int p10;
-    int p15, p20;
-    int p40, p50, p60;
+    int ilosc_dan[6];
     int suma;
-} Statystyki;
+};
 
 // ====== GLOBAL VARIABLES ======
 extern int shm_id, sem_id;
-extern Kolejka *kolejka;
-extern Stolik *stoliki;
-extern Tasma *tasma;
-extern Statystyki *kuchnia, *kasa;
+extern struct Kolejka *kolejka;
+extern struct Stolik *stoliki;
+extern struct Tasma *tasma;
+extern struct Statystyki *kuchnia, *kasa;
 extern int *sygnal_kierownika;
 extern int *restauracja_otwarta;
 
@@ -82,14 +93,14 @@ void sem_op(int sem, int val);
  * Adds a group to the queue
  * @param g - group structure
  */
-void push(Grupa g);
+void push(struct Grupa g);
 
 /**
  * Removes a group from the queue
  * @param g - pointer to group structure
  * @return 1 if successful, 0 if queue is empty
  */
-int pop(Grupa *g);
+int pop(struct Grupa *g);
 
 /**
  * Client process - generates customer groups

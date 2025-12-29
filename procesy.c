@@ -6,7 +6,7 @@ void klient()
     srand(getpid()); // inicjalizacja generatora liczb losowych
     while (*restauracja_otwarta)
     {
-        Grupa g;                          // generowanie grupy klientów
+        struct Grupa g;                   // generowanie grupy klientów
         g.osoby = rand() % 4 + 1;         // od 1 do 4 osób
         g.dorosli = rand() % g.osoby + 1; // co najmniej 1 dorosły
         g.dzieci = g.osoby - g.dorosli;   // reszta to dzieci
@@ -67,8 +67,8 @@ void obsluga()
             sem_op(SEM_KOLEJKA, 1);
         }
 
-        Grupa g;     // obsługa grup z kolejki
-        if (pop(&g)) // jeśli jest grupa w kolejce
+        struct Grupa g; // obsługa grup z kolejki
+        if (pop(&g))    // jeśli jest grupa w kolejce
         {
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
@@ -90,6 +90,7 @@ void obsluga()
             int ceny[] = {10, 15, 20};
             int c = ceny[rand() % 3];
             tasma->talerze[tasma->ilosc++] = c;
+            printf("Danie za %d zł podane na taśmę\n", c);
         }
         sem_op(SEM_TASMA, 1);
 
@@ -132,4 +133,39 @@ void kierownik()
         printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
     }
     exit(0);
+}
+
+// ====== SEMAFORY ======
+void sem_op(int sem, int val) // wykonanie operacji na semaforze, val = +1 (zwolnienie), -1 (zablokowanie)
+{
+    struct sembuf sb = {sem, val, 0}; // inicjalizacja struktury operacji semaforowej,
+    semop(sem_id, &sb, 1);            // wykonanie operacji na semaforze,
+}
+
+// ====== KOLEJKA ======
+void push(struct Grupa g)
+{
+    sem_op(SEM_KOLEJKA, -1);          // zablokowanie semafora
+    if (kolejka->ilosc < MAX_KOLEJKA) // sprawdzenie czy jest miejsce w kolejce
+    {
+        kolejka->q[kolejka->tyl] = g;                    // dodanie grupy na koniec kolejki
+        kolejka->tyl = (kolejka->tyl + 1) % MAX_KOLEJKA; // przesunięcie tylu
+        kolejka->ilosc++;                                // zwiększenie ilości grup w kolejce
+    }
+    sem_op(SEM_KOLEJKA, 1); // zwolnienie semafora
+}
+
+int pop(struct Grupa *g)
+{
+    sem_op(SEM_KOLEJKA, -1); // zablokowanie semafora
+    if (kolejka->ilosc == 0) // sprawdzenie czy kolejka jest pusta
+    {
+        sem_op(SEM_KOLEJKA, 1); // zwolnienie semafora
+        return 0;
+    }
+    *g = kolejka->q[kolejka->przod];                     // pobranie grupy z przodu kolejki
+    kolejka->przod = (kolejka->przod + 1) % MAX_KOLEJKA; // przesunięcie przodu
+    kolejka->ilosc--;                                    // zmniejszenie ilości grup w kolejce
+    sem_op(SEM_KOLEJKA, 1);                              // zwolnienie semafora
+    return 1;
 }
