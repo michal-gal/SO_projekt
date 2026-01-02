@@ -11,22 +11,19 @@
 #include <signal.h>
 
 // ====== CONSTANTS ======
-#define X1 40
-#define X2 30
-#define X3 20
-#define X4 10
+#define X1 10
+#define X2 8
+#define X3 5
+#define X4 3
 #define p15 15
 #define p20 20
 #define p40 40
 #define p50 50
 #define p60 60
-#define CENY_DAN [6] = {p15, p20, p40, p50, p60}
-#define ILOSC_STOLIKOW [4] = {X1, X2, X3, X4}
-#define LADA 50
-#define MAX_OSOBY (LADA + X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4)
-#define MAX_STOLIKI (LADA + X1 + X2 + X3 + X4)
+#define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4)
+#define MAX_STOLIKI (X1 + X2 + X3 + X4)
 #define MAX_KOLEJKA 500
-#define MAX_TASMA 500
+#define MAX_TASMA 50
 #define CZAS_PRACY 30
 
 // ====== SEMAPHORE IDS ======
@@ -65,18 +62,11 @@ struct Tasma
     int ilosc; // liczba talerzy na taśmie
 };
 
-struct Statystyki
-{
-    int ilosc_dan[6];
-    int suma;
-};
-
 // ====== GLOBAL VARIABLES ======
 extern int shm_id, sem_id;
 extern struct Kolejka *kolejka;
 extern struct Stolik *stoliki;
 extern struct Tasma *tasma;
-extern struct Statystyki *kuchnia, *kasa;
 extern int *sygnal_kierownika;
 extern int *restauracja_otwarta;
 
@@ -121,5 +111,7 @@ void kucharz(void);
  * Manager process - sends signals to adjust productivity
  */
 void kierownik(void);
+
+void generator_klientow(void);
 
 #endif // RESTAURACJA_H

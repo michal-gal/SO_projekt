@@ -3,41 +3,94 @@
 // ====== PROCES KLIENT ======
 void klient()
 {
-    srand(getpid()); // inicjalizacja generatora liczb losowych
+    struct Grupa g;
+
+    g.osoby = rand() % 4 + 1;
+    g.dorosli = rand() % g.osoby + 1;
+    g.dzieci = g.osoby - g.dorosli;
+
+    if (g.dzieci > g.dorosli * 3)
+        exit(0); // warunek zadania
+
+    g.vip = (rand() % 100 < 2);
+    g.wejscie = time(NULL);
+
+    if (g.vip)
+    {
+        // === VIP ===
+        sem_op(SEM_STOLIKI, -1);
+        for (int i = 0; i < MAX_STOLIKI; i++)
+        {
+            if (!stoliki[i].zajety &&
+                stoliki[i].pojemnosc == g.osoby)
+            {
+
+                stoliki[i].zajety = 1;
+                stoliki[i].grupa = g;
+                break;
+            }
+        }
+        sem_op(SEM_STOLIKI, 1);
+    }
+    else
+    {
+        // === NORMALNY ===
+        push(g); // kolejka FIFO
+        // klient „czeka” logicznie
+    }
+
+    // === KONSUMPCJA ===
+    sleep(rand() % 5 + 3);
+
+    // === PŁATNOŚĆ ===
+    sem_op(SEM_TASMA, -1);
+    // zaplacaenie za pobrane dania
+    for (int i = 0; i < 6; i++)
+    {
+        int ceny[] = {15, 20, 40, 50, 60};
+        int ilosc_dan = g.pobrane_dania[i];
+        int cena_dania = ceny[i];
+        int kwota = ilosc_dan * cena_dania;
+        // kasa->ilosc_dan[i] += ilosc_dan; --- IGNORE
+
+        // kasa->suma += kwota; --- IGNORE ---
+    }
+
+    sem_op(SEM_TASMA, 1);
+
+    // === WYJŚCIE ===
+    sem_op(SEM_STOLIKI, -1);
+    for (int i = 0; i < MAX_STOLIKI; i++)
+    {
+        if (stoliki[i].zajety &&
+            stoliki[i].grupa.wejscie == g.wejscie)
+        {
+
+            stoliki[i].zajety = 0;
+            break;
+        }
+    }
+    sem_op(SEM_STOLIKI, 1);
+
+    exit(0);
+}
+
+void generator_klientow()
+{
+    srand(getpid());
+
     while (*restauracja_otwarta)
     {
-        struct Grupa g;                   // generowanie grupy klientów
-        g.osoby = rand() % 4 + 1;         // od 1 do 4 osób
-        g.dorosli = rand() % g.osoby + 1; // co najmniej 1 dorosły
-        g.dzieci = g.osoby - g.dorosli;   // reszta to dzieci
-        if (g.dzieci > g.dorosli * 3)     // ograniczenie: max 3 dzieci na dorosłego
-            continue;
-        g.vip = (rand() % 100 < 2); // 2% szans na bycie VIPem
-        g.wejscie = time(NULL);     // czas wejścia
+        pid_t pid = fork();
 
-        printf("Nowa grupa: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
+        if (pid == 0)
+        {
+            klient(); // ← JEDNA grupa
+            exit(0);
+        }
 
-        if (g.vip)
-        {
-            sem_op(SEM_STOLIKI, -1);
-            for (int i = 0; i < MAX_STOLIKI; i++)
-            {
-                if (!stoliki[i].zajety && stoliki[i].pojemnosc == g.osoby)
-                {
-                    stoliki[i].zajety = 1;
-                    stoliki[i].grupa = g;
-                    break;
-                }
-            }
-            sem_op(SEM_STOLIKI, 1);
-        }
-        else
-        {
-            push(g);
-        }
-        sleep(rand() % 3 + 1);
+        sleep(rand() % 3 + 1); // losowe przyjścia
     }
-    exit(0);
 }
 
 // ====== OBSŁUGA ======
@@ -47,12 +100,15 @@ void obsluga()
     {
         int wydajnosc = 1;
         if (*sygnal_kierownika == 1)
+        {
             wydajnosc = 2;
-        printf("Zwiększona wydajność obsługi!\n");
+            printf("Zwiększona wydajność obsługi!\n");
+        }
         if (*sygnal_kierownika == 2)
+        {
             wydajnosc = 0.5;
-        printf("Zmniejszona wydajność obsługi!\n");
-
+            printf("Zmniejszona wydajność obsługi!\n");
+        }
         if (*sygnal_kierownika == 3) // sygnał do zamknięcia restauracji
         {
             printf("Kierownik zamyka restaurację!\n");
@@ -65,6 +121,10 @@ void obsluga()
             sem_op(SEM_KOLEJKA, -1);
             kolejka->ilosc = 0;
             sem_op(SEM_KOLEJKA, 1);
+        }
+        else
+        {
+            printf("Restauracja działa normalnie.\n");
         }
 
         struct Grupa g; // obsługa grup z kolejki
@@ -104,22 +164,14 @@ void kucharz()
 {
     while (*restauracja_otwarta)
     {
-        int ceny[] = {10, 15, 20, 40, 50, 60};
-        int c = ceny[rand() % 6];
-
-        sem_op(SEM_TASMA, -1); // dodanie dania na taśmę
-        if (tasma->ilosc < MAX_TASMA)
-        {
-            tasma->talerze[tasma->ilosc++] = c;
-            kuchnia->suma += c;
-        }
-        sem_op(SEM_TASMA, 1); // zwolnienie semafora
-        printf("Danie za %d zł dodane na taśmę\n", c);
-
         sleep(2);
     }
 
-    printf("\n=== PODSUMOWANIE KUCHNI ===\nSuma: %d zł\n", kuchnia->suma);
+    for (int i = 0; i < 6; i++)
+    {
+        // printf("Kuchnia - liczba wydanych dań za %d zł: %d\n", ceny[i], kuchnia->ilosc_dan[i]); --- IGNORE ---
+    }
+    printf("\n=== PODSUMOWANIE KUCHNI ===\nSuma: %d zł\n", 0 /* kuchnia->suma */); // --- IGNORE ---
     exit(0);
 }
 
@@ -128,8 +180,10 @@ void kierownik()
 {
     while (*restauracja_otwarta)
     {
-        *sygnal_kierownika = rand() % 4;
-        sleep(5);
+        *sygnal_kierownika = 0; // normalna praca
+
+        sleep(10);
+        *sygnal_kierownika = rand() % 4; // losowa zmiana sygnału
         printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
     }
     exit(0);
