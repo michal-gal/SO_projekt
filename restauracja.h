@@ -15,6 +15,7 @@
 #define X2 8
 #define X3 5
 #define X4 3
+#define p10 10
 #define p15 15
 #define p20 20
 #define p40 40

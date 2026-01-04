@@ -1,5 +1,17 @@
 #include "restauracja.h"
 
+// ====== GLOBALNE ZMIENNE WSPÓŁDZIELONE ======
+extern int shm_id, sem_id;                           // ID pamięci współdzielonej i semaforów
+extern struct Kolejka *kolejka;                      // wskaźnik na kolejkę
+extern struct Stolik *stoliki;                       // wskaźnik na tablicę stolików
+extern struct Tasma *tasma;                          // wskaźnik na taśmę
+extern int *sygnal_kierownika;                       // wskaźnik na sygnał kierownika
+extern int *restauracja_otwarta;                     // wskaźnik na stan restauracji
+static const int ILOSC_STOLIKOW[4] = {5, 5, 3, 2};   // liczba stolików o pojemności 1,2,3,4
+static const int CENY_DAN[6] = {15, 20, 40, 50, 60}; // ceny dań;
+extern int *kuchnia_dania_wydane;                    // liczba wydanych dań przez kuchnię
+extern int *kasa_dania_sprzedane;                    // liczba sprzedanych dań przez kasę
+
 // ====== PROCES KLIENT ======
 void klient()
 {
@@ -51,9 +63,8 @@ void klient()
         int ilosc_dan = g.pobrane_dania[i];
         int cena_dania = ceny[i];
         int kwota = ilosc_dan * cena_dania;
-        // kasa->ilosc_dan[i] += ilosc_dan; --- IGNORE
-
-        // kasa->suma += kwota; --- IGNORE ---
+        kasa_dania_sprzedane[i] += ilosc_dan;
+        printf("Grupa płaci za %d dań za %d zł każde, łącznie: %d zł\n", ilosc_dan, cena_dania, kwota);
     }
 
     sem_op(SEM_TASMA, 1);
@@ -98,6 +109,7 @@ void obsluga()
 {
     while (*restauracja_otwarta)
     {
+        // sprawdzanie sygnału kierownika //
         int wydajnosc = 1;
         if (*sygnal_kierownika == 1)
         {
@@ -127,6 +139,8 @@ void obsluga()
             printf("Restauracja działa normalnie.\n");
         }
 
+        // obsługa grup w kolejce //
+
         struct Grupa g; // obsługa grup z kolejki
         if (pop(&g))    // jeśli jest grupa w kolejce
         {
@@ -143,14 +157,15 @@ void obsluga()
             }
             sem_op(SEM_STOLIKI, 1);
         }
-
+        // podawanie dań na taśmę //
         sem_op(SEM_TASMA, -1);
         for (int i = 0; i < wydajnosc && tasma->ilosc < MAX_TASMA; i++)
         {
-            int ceny[] = {10, 15, 20};
+            int ceny[] = {p10, p15, p20};
             int c = ceny[rand() % 3];
             tasma->talerze[tasma->ilosc++] = c;
             printf("Danie za %d zł podane na taśmę\n", c);
+            kuchnia_dania_wydane[c / 10 - 1]++;
         }
         sem_op(SEM_TASMA, 1);
 
@@ -166,12 +181,14 @@ void kucharz()
     {
         sleep(2);
     }
-
+    int kuchnia_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        // printf("Kuchnia - liczba wydanych dań za %d zł: %d\n", ceny[i], kuchnia->ilosc_dan[i]); --- IGNORE ---
+        printf("Kuchnia - liczba wydanych dań za %d zł: %d\n", CENY_DAN[i], kuchnia_dania_wydane[i]);
+
+        kuchnia_suma += kuchnia_dania_wydane[i] * CENY_DAN[i];
     }
-    printf("\n=== PODSUMOWANIE KUCHNI ===\nSuma: %d zł\n", 0 /* kuchnia->suma */); // --- IGNORE ---
+    printf("\n=== PODSUMOWANIE KUCHNI ===\nSuma: %d zł\n", kuchnia_suma);
     exit(0);
 }
 
