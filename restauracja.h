@@ -9,6 +9,7 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <signal.h>
+#include <string.h>
 
 // ====== CONSTANTS ======
 #define X1 10
@@ -39,6 +40,7 @@ struct Grupa
     int dzieci;
     int dorosli;
     int vip;
+    int stolik_przydzielony;
     time_t wejscie;
     int pobrane_dania[6]; // liczba pobranych dań
 };
@@ -62,6 +64,9 @@ struct Tasma
     int talerze[MAX_TASMA];
     int ilosc; // liczba talerzy na taśmie
 };
+
+// static struct sembuf P = {0, -1, 0};
+// static struct sembuf V = {0, 1, 0};
 
 // ====== GLOBAL VARIABLES ======
 extern int shm_id, sem_id;
@@ -114,5 +119,9 @@ void kucharz(void);
 void kierownik(void);
 
 void generator_klientow(void);
+void generator_stolikow(struct Stolik *stoliki);
+void przesun_tasme_cyklicznie(int *tasma);
+void dodaj_danie(int *tasma, int cena);
+void klient_sprawdz_i_bierz(struct Grupa *g, int *tasma);
 
 #endif // RESTAURACJA_H

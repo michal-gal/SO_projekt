@@ -7,10 +7,10 @@ struct Stolik *stoliki;                                        // wskaźnik na t
 struct Tasma *tasma;                                           // wskaźnik na taśmę
 int *sygnal_kierownika;                                        // wskaźnik na sygnał kierownika
 int *restauracja_otwarta;                                      // wskaźnik na stan restauracji
-static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
-static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
 int *kuchnia_dania_wydane;                                     // liczba wydanych dań przez kuchnię
 int *kasa_dania_sprzedane;                                     // liczba sprzedanych dań przez kasę
+static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
+static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
 
 // ====== MAIN ======
 int main()
@@ -26,6 +26,7 @@ int main()
 
     shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0666); // utworzenie pamięci współdzielonej
     void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);   // dołączenie pamięci współdzielonej
+    memset(pamiec_wspoldzielona, 0, bufor);                // wyzerowanie pamięci
 
     kolejka = pamiec_wspoldzielona;
     stoliki = (void *)(kolejka + 1);
@@ -40,23 +41,7 @@ int main()
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
     semctl(sem_id, SEM_TASMA, SETVAL, 1);
 
-    int idx = 0;
-
-    for (int i = 0; i < 4; i++)
-    { // typ stolika: 1..4
-        for (int j = 0; j < ILOSC_STOLIKOW[i]; j++)
-        { // liczba stolików danego typu
-            stoliki[idx].numer_stolika = idx;
-            stoliki[idx].pojemnosc = i + 1;
-            stoliki[idx].zajety = 0;
-
-            printf("Stolik %d o pojemności %d utworzony.\n",
-                   stoliki[idx].numer_stolika,
-                   stoliki[idx].pojemnosc);
-
-            idx++; // przechodzimy do kolejnego stolika
-        }
-    }
+    generator_stolikow(stoliki);
 
     *restauracja_otwarta = 1;
 
