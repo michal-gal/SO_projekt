@@ -93,6 +93,11 @@ int main()
     *restauracja_otwarta = 0;
 
     sleep(3);
+
+    // Czekanie na zakończenie wszystkich procesów potomnych
+    while (wait(NULL) > 0)
+        ;
+
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);
     signal(SIGCHLD, SIG_IGN); // zapobieganie procesom zombie

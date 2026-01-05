@@ -10,6 +10,7 @@
 #include <sys/sem.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/wait.h>
 
 // ====== CONSTANTS ======
 #define X1 10
@@ -63,7 +64,6 @@ struct Stolik
 struct Tasma
 {
     int talerze[MAX_TASMA];
-    int ilosc; // liczba talerzy na taśmie
 };
 
 // ====== GLOBAL VARIABLES ======

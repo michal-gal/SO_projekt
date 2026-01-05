@@ -39,7 +39,7 @@ void klient()
     {
         // === NORMALNY ===
         push(g.proces_id); // kolejka FIFO
-        printf("Grupa dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
+        printf("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.proces_id, g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
         // oczekiwanie na przydział stolika
         pid_t moj_proces_id = g.proces_id;
         while (g.stolik_przydzielony == -1)
@@ -50,7 +50,7 @@ void klient()
                 if (stoliki[i].zajety && stoliki[i].proces_id == moj_proces_id)
                 {
                     g.stolik_przydzielony = i;
-                    printf("Grupa znalazła swój stolik: %d\n", i);
+                    printf("Grupa %d znalazła swój stolik: %d\n", g.proces_id, i);
                     break;
                 }
             }
@@ -62,41 +62,32 @@ void klient()
 
     // === CZEKANIE NA DANIA ===
     int dania_pobrane = 0;
-    int dania_do_pobrania = rand() % 3 + 2; // losowa liczba dań do pobrania (2-4)
-    time_t czas_start = time(NULL);
+    int dania_do_pobrania = rand() % 8 + 3; // losowa liczba dań do pobrania (3-10)
+    // time_t czas_start = time(NULL);
 
-    while (dania_pobrane < dania_do_pobrania && (time(NULL) - czas_start) < 15) // czekaj max 15 sekund
+    while (dania_pobrane < dania_do_pobrania)
     {
         sem_op(SEM_TASMA, -1);
-        if (tasma->ilosc > 0 && tasma->talerze[0] != 0)
+        if (tasma->talerze[0] != 0)
         {
             // pobierz danie z pozycji 0 taśmy
             int cena = tasma->talerze[0];
-            if (cena == 15)
+            if (cena == 10)
                 g.pobrane_dania[0]++;
-            else if (cena == 20)
+            else if (cena == 15)
                 g.pobrane_dania[1]++;
-            else if (cena == 40)
+            else if (cena == 20)
                 g.pobrane_dania[2]++;
-            else if (cena == 50)
-                g.pobrane_dania[3]++;
-            else if (cena == 60)
-                g.pobrane_dania[4]++;
 
-            printf("Grupa przy stoliku %d pobrała danie za %d zł (pobrane: %d/%d)\n",
-                   g.stolik_przydzielony, cena, dania_pobrane + 1, dania_do_pobrania);
+            printf("Grupa %d przy stoliku %d pobrała danie za %d zł (pobrane: %d/%d)\n",
+                   g.proces_id, g.stolik_przydzielony, cena, dania_pobrane + 1, dania_do_pobrania);
             dania_pobrane++;
         }
         sem_op(SEM_TASMA, 1);
-
-        if (dania_pobrane < dania_do_pobrania)
-            sleep(1); // czekaj na kolejne danie
+        sleep(1); // czekaj na kolejne danie
     }
 
-    printf("Grupa przy stoliku %d gotowa do płatności (pobrała %d dań)\n", g.stolik_przydzielony, dania_pobrane);
-
-    // === KONSUMPCJA ===
-    sleep(rand() % 3 + 1);
+    printf("Grupa %d przy stoliku %d gotowa do płatności (pobrała %d dań)\n", g.proces_id, g.stolik_przydzielony, dania_pobrane);
 
     // === PŁATNOŚĆ ===
     sem_op(SEM_TASMA, -1);
@@ -108,7 +99,7 @@ void klient()
         int ilosc_dan = g.pobrane_dania[i];
         int kwota = ilosc_dan * CENY_DAN[i];
         kasa_dania_sprzedane[i] += ilosc_dan;
-        printf("Grupa płaci za %d dań za %d zł każde, łącznie: %d zł\n", ilosc_dan, CENY_DAN[i], kwota);
+        printf("Grupa %d płaci za %d dań za %d zł każde, łącznie: %d zł\n", g.proces_id, ilosc_dan, CENY_DAN[i], kwota);
     }
 
     sem_op(SEM_TASMA, 1);
@@ -120,7 +111,8 @@ void klient()
         if (stoliki[i].zajety &&
             stoliki[i].proces_id == g.proces_id)
         {
-
+            printf("Grupa %d przy stoliku %d opuszcza restaurację.\n", g.proces_id, i);
+            stoliki[i].proces_id = 0;
             stoliki[i].zajety = 0;
             break;
         }
@@ -202,13 +194,12 @@ void obsluga()
             sem_op(SEM_STOLIKI, 1);
         }
         // podawanie dań na taśmę //
-        for (int i = 0; i < wydajnosc && tasma->ilosc < MAX_TASMA; i++)
+        for (int i = 0; i < wydajnosc; i++)
         {
             int ceny[] = {p10, p15, p20};
             int c = ceny[rand() % 3];
             sem_op(SEM_TASMA, -1);
             dodaj_danie(tasma->talerze, c);
-            tasma->ilosc++;
             sem_op(SEM_TASMA, 1);
             printf("Danie za %d zł podane na taśmę\n", c);
             kuchnia_dania_wydane[c / 10 - 1]++;
@@ -341,7 +332,7 @@ void klient_sprawdz_i_bierz(struct Grupa *g, int *tasma)
         else if (cena == 20)
             g->pobrane_dania[2]++;
         tasma[s] = 0; // talerz zabrany
-        printf("Grupa przy stoliku %d pobrała danie za %d zł\n", s, cena);
+        printf("Grupa %d przy stoliku %d pobrała danie za %d zł\n", g->proces_id, s, cena);
     }
 }
 
@@ -354,7 +345,7 @@ void przydziel_stolik(struct Grupa *g)
         {
             stoliki[i].zajety = 1;
             stoliki[i].proces_id = g->proces_id;
-            printf("Grupa VIP usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g->osoby, g->dorosli, g->dzieci, i);
+            printf("Grupa VIP %d usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g->proces_id, g->osoby, g->dorosli, g->dzieci, i);
             g->stolik_przydzielony = i;
             break;
         }
