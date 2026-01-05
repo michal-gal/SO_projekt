@@ -17,6 +17,7 @@ void klient()
 {
     struct Grupa g;
 
+    g.proces_id = getpid();
     g.osoby = rand() % 4 + 1;
     g.dorosli = rand() % g.osoby + 1;
     g.dzieci = g.osoby - g.dorosli;
@@ -40,13 +41,13 @@ void klient()
         push(g); // kolejka FIFO
         printf("Grupa dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
         // oczekiwanie na przydział stolika
-        time_t moj_czas_wejscia = g.wejscie;
+        pid_t moj_proces_id = g.proces_id;
         while (g.stolik_przydzielony == -1)
         {
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].zajety && stoliki[i].grupa.wejscie == moj_czas_wejscia)
+                if (stoliki[i].zajety && stoliki[i].grupa.proces_id == moj_proces_id)
                 {
                     g.stolik_przydzielony = i;
                     printf("Grupa znalazła swój stolik: %d\n", i);
@@ -117,7 +118,7 @@ void klient()
     for (int i = 0; i < MAX_STOLIKI; i++)
     {
         if (stoliki[i].zajety &&
-            stoliki[i].grupa.wejscie == g.wejscie)
+            stoliki[i].proces_id == g.proces_id)
         {
 
             stoliki[i].zajety = 0;
@@ -193,7 +194,7 @@ void obsluga()
                 if (!stoliki[i].zajety && stoliki[i].pojemnosc == g.osoby)
                 {
                     stoliki[i].zajety = 1;
-                    stoliki[i].grupa = g;
+                    stoliki[i].proces_id = g.proces_id;
                     printf("Grupa usadzona: %d osób (dorosłych: %d, dzieci: %d)%s przy stoliku: %d\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "", i);
                     g.stolik_przydzielony = i;
                     break;
@@ -353,7 +354,7 @@ void przydziel_stolik(struct Grupa *g)
         if (!stoliki[i].zajety && stoliki[i].pojemnosc >= g->osoby)
         {
             stoliki[i].zajety = 1;
-            stoliki[i].grupa = *g;
+            stoliki[i].proces_id = g->proces_id;
             printf("Grupa VIP usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g->osoby, g->dorosli, g->dzieci, i);
             g->stolik_przydzielony = i;
             break;

@@ -36,6 +36,7 @@
 // ====== STRUCTURES ======
 struct Grupa
 {
+    pid_t proces_id;
     int osoby;
     int dzieci;
     int dorosli;
@@ -56,7 +57,7 @@ struct Stolik
     int numer_stolika;
     int pojemnosc;
     int zajety;
-    struct Grupa grupa;
+    pid_t proces_id;
 };
 
 struct Tasma
