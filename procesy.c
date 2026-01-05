@@ -4,7 +4,7 @@
 void klient()
 {
     // Ustaw timeout - jeśli proces będzie działał dłużej niż 30 sekund, wymuś jego zakończenie
-    alarm(30);
+    // alarm(30);
 
     struct Grupa g;
 
@@ -234,7 +234,14 @@ void obsluga()
             dodaj_danie(tasma, c);
             sem_op(SEM_TASMA, 1);
             printf("Danie za %d zł podane na taśmę\n", c);
-            kuchnia_dania_wydane[c / 10 - 1]++;
+
+            // Inkrementuj licznik wydanych dań dla odpowiedniej ceny
+            if (c == 10)
+                kuchnia_dania_wydane[0]++;
+            else if (c == 15)
+                kuchnia_dania_wydane[1]++;
+            else if (c == 20)
+                kuchnia_dania_wydane[2]++;
         }
 
         sleep(1);
