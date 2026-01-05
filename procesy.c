@@ -38,7 +38,7 @@ void klient()
     else
     {
         // === NORMALNY ===
-        push(g); // kolejka FIFO
+        push(g.proces_id); // kolejka FIFO
         printf("Grupa dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
         // oczekiwanie na przydział stolika
         pid_t moj_proces_id = g.proces_id;
@@ -47,7 +47,7 @@ void klient()
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].zajety && stoliki[i].grupa.proces_id == moj_proces_id)
+                if (stoliki[i].zajety && stoliki[i].proces_id == moj_proces_id)
                 {
                     g.stolik_przydzielony = i;
                     printf("Grupa znalazła swój stolik: %d\n", i);
@@ -185,18 +185,17 @@ void obsluga()
 
         // obsługa grup w kolejce //
 
-        struct Grupa g; // obsługa grup z kolejki
-        if (pop(&g))    // jeśli jest grupa w kolejce
+        pid_t pid_z_kolejki;     // obsługa grup z kolejki
+        if (pop(&pid_z_kolejki)) // jeśli jest grupa w kolejce
         {
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (!stoliki[i].zajety && stoliki[i].pojemnosc == g.osoby)
+                if (!stoliki[i].zajety)
                 {
                     stoliki[i].zajety = 1;
-                    stoliki[i].proces_id = g.proces_id;
-                    printf("Grupa usadzona: %d osób (dorosłych: %d, dzieci: %d)%s przy stoliku: %d\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "", i);
-                    g.stolik_przydzielony = i;
+                    stoliki[i].proces_id = pid_z_kolejki;
+                    printf("Grupa usadzona: PID %d przy stoliku: %d\n", pid_z_kolejki, i);
                     break;
                 }
             }
@@ -260,19 +259,19 @@ void sem_op(int sem, int val) // wykonanie operacji na semaforze, val = +1 (zwol
 }
 
 // ====== KOLEJKA ======
-void push(struct Grupa g)
+void push(pid_t pid)
 {
     sem_op(SEM_KOLEJKA, -1);          // zablokowanie semafora
     if (kolejka->ilosc < MAX_KOLEJKA) // sprawdzenie czy jest miejsce w kolejce
     {
-        kolejka->q[kolejka->tyl] = g;                    // dodanie grupy na koniec kolejki
+        kolejka->q[kolejka->tyl] = pid;                  // dodanie pid na koniec kolejki
         kolejka->tyl = (kolejka->tyl + 1) % MAX_KOLEJKA; // przesunięcie tylu
         kolejka->ilosc++;                                // zwiększenie ilości grup w kolejce
     }
     sem_op(SEM_KOLEJKA, 1); // zwolnienie semafora
 }
 
-int pop(struct Grupa *g)
+int pop(pid_t *pid)
 {
     sem_op(SEM_KOLEJKA, -1); // zablokowanie semafora
     if (kolejka->ilosc == 0) // sprawdzenie czy kolejka jest pusta
@@ -280,7 +279,7 @@ int pop(struct Grupa *g)
         sem_op(SEM_KOLEJKA, 1); // zwolnienie semafora
         return 0;
     }
-    *g = kolejka->q[kolejka->przod];                     // pobranie grupy z przodu kolejki
+    *pid = kolejka->q[kolejka->przod];                   // pobranie pid z przodu kolejki
     kolejka->przod = (kolejka->przod + 1) % MAX_KOLEJKA; // przesunięcie przodu
     kolejka->ilosc--;                                    // zmniejszenie ilości grup w kolejce
     sem_op(SEM_KOLEJKA, 1);                              // zwolnienie semafora

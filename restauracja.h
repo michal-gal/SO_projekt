@@ -48,7 +48,7 @@ struct Grupa
 
 struct Kolejka
 {
-    struct Grupa q[MAX_KOLEJKA];
+    pid_t q[MAX_KOLEJKA];
     int przod, tyl, ilosc;
 };
 
@@ -85,16 +85,16 @@ void sem_op(int sem, int val);
 
 /**
  * Adds a group to the queue
- * @param g - group structure
+ * @param pid - process ID of group
  */
-void push(struct Grupa g);
+void push(pid_t pid);
 
 /**
  * Removes a group from the queue
- * @param g - pointer to group structure
+ * @param pid - pointer to process ID
  * @return 1 if successful, 0 if queue is empty
  */
-int pop(struct Grupa *g);
+int pop(pid_t *pid);
 
 /**
  * Client process - generates customer groups
