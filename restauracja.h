@@ -65,9 +65,6 @@ struct Tasma
     int ilosc; // liczba talerzy na taśmie
 };
 
-// static struct sembuf P = {0, -1, 0};
-// static struct sembuf V = {0, 1, 0};
-
 // ====== GLOBAL VARIABLES ======
 extern int shm_id, sem_id;
 extern struct Kolejka *kolejka;
@@ -123,5 +120,6 @@ void generator_stolikow(struct Stolik *stoliki);
 void przesun_tasme_cyklicznie(int *tasma);
 void dodaj_danie(int *tasma, int cena);
 void klient_sprawdz_i_bierz(struct Grupa *g, int *tasma);
+void przydziel_stolik(struct Grupa *g);
 
 #endif // RESTAURACJA_H

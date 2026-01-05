@@ -32,27 +32,31 @@ void klient()
     if (g.vip)
     {
         // === VIP ===
-        sem_op(SEM_STOLIKI, -1);
-        for (int i = 0; i < MAX_STOLIKI; i++)
-        {
-            if (!stoliki[i].zajety &&
-                stoliki[i].pojemnosc == g.osoby)
-            {
-
-                stoliki[i].zajety = 1;
-                stoliki[i].grupa = g;
-                printf("VIP Grupa usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g.osoby, g.dorosli, g.dzieci, i);
-                g.stolik_przydzielony = i;
-                break;
-            }
-        }
-        sem_op(SEM_STOLIKI, 1);
+        przydziel_stolik(&g);
     }
     else
     {
         // === NORMALNY ===
         push(g); // kolejka FIFO
-        // klient „czeka” logicznie
+        printf("Grupa dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
+        // oczekiwanie na przydział stolika
+        time_t moj_czas_wejscia = g.wejscie;
+        while (g.stolik_przydzielony == -1)
+        {
+            sem_op(SEM_STOLIKI, -1);
+            for (int i = 0; i < MAX_STOLIKI; i++)
+            {
+                if (stoliki[i].zajety && stoliki[i].grupa.wejscie == moj_czas_wejscia)
+                {
+                    g.stolik_przydzielony = i;
+                    printf("Grupa znalazła swój stolik: %d\n", i);
+                    break;
+                }
+            }
+            sem_op(SEM_STOLIKI, 1);
+            if (g.stolik_przydzielony == -1)
+                sleep(1);
+        }
     }
 
     // === CZEKANIE NA DANIA ===
@@ -339,4 +343,21 @@ void klient_sprawdz_i_bierz(struct Grupa *g, int *tasma)
         tasma[s] = 0; // talerz zabrany
         printf("Grupa przy stoliku %d pobrała danie za %d zł\n", s, cena);
     }
+}
+
+void przydziel_stolik(struct Grupa *g)
+{
+    sem_op(SEM_STOLIKI, -1);
+    for (int i = 0; i < MAX_STOLIKI; i++)
+    {
+        if (!stoliki[i].zajety && stoliki[i].pojemnosc >= g->osoby)
+        {
+            stoliki[i].zajety = 1;
+            stoliki[i].grupa = *g;
+            printf("Grupa VIP usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g->osoby, g->dorosli, g->dzieci, i);
+            g->stolik_przydzielony = i;
+            break;
+        }
+    }
+    sem_op(SEM_STOLIKI, 1);
 }
