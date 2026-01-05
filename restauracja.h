@@ -57,22 +57,16 @@ struct Stolik
 {
     int numer_stolika;
     int pojemnosc;
-    int zajety;
     pid_t proces_id;
-};
-
-struct Tasma
-{
-    int talerze[MAX_TASMA];
 };
 
 // ====== GLOBAL VARIABLES ======
 extern int shm_id, sem_id;
 extern struct Kolejka *kolejka;
 extern struct Stolik *stoliki;
-extern struct Tasma *tasma;
 extern int *sygnal_kierownika;
 extern int *restauracja_otwarta;
+extern int *tasma;
 
 // ====== FUNCTION DECLARATIONS ======
 

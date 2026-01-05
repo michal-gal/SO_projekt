@@ -4,11 +4,11 @@
 int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
 struct Kolejka *kolejka;   // wskaźnik na kolejkę
 struct Stolik *stoliki;    // wskaźnik na tablicę stolików
-struct Tasma *tasma;       // wskaźnik na taśmę
 int *sygnal_kierownika;    // wskaźnik na sygnał kierownika
 int *restauracja_otwarta;  // wskaźnik na stan restauracji
 int *kuchnia_dania_wydane; // liczba wydanych dań przez kuchnię
 int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
+int *tasma;                // tablica reprezentująca taśmę
 // static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
 // static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
 
@@ -19,7 +19,7 @@ int main()
     srand(time(NULL));
     int bufor = sizeof(struct Kolejka) +              // kolejka
                 sizeof(struct Stolik) * MAX_STOLIKI + // stoliki
-                sizeof(struct Tasma) +                // taśma
+                sizeof(int) * MAX_TASMA +             // taśma
                 sizeof(int) * 6 * 2 +                 // kuchnia i kasa - liczba dań
                 sizeof(int) * 2 +                     // sygnał kierownika i stan restauracji
                 sizeof(int) * 6;                      // pobrane dania
@@ -30,8 +30,8 @@ int main()
 
     kolejka = pamiec_wspoldzielona;
     stoliki = (void *)(kolejka + 1);
-    tasma = (void *)(stoliki + MAX_STOLIKI);
-    kuchnia_dania_wydane = (int *)(tasma + 1);
+    tasma = (int *)(stoliki + MAX_STOLIKI);
+    kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);
     kasa_dania_sprzedane = kuchnia_dania_wydane + 6;
     sygnal_kierownika = kasa_dania_sprzedane + 6;
     restauracja_otwarta = sygnal_kierownika + 1;
@@ -97,7 +97,6 @@ int main()
     // Czekanie na zakończenie wszystkich procesów potomnych
     while (wait(NULL) > 0)
         ;
-
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);
     signal(SIGCHLD, SIG_IGN); // zapobieganie procesom zombie
