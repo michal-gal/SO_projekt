@@ -29,6 +29,18 @@
 #define MAX_TASMA 50
 #define CZAS_PRACY 30
 
+// ====== ZMIENNE GLOBALNE ======
+extern int shm_id, sem_id;                                     // ID pamięci współdzielonej i semaforów
+extern struct Kolejka *kolejka;                                // wskaźnik na kolejkę
+extern struct Stolik *stoliki;                                 // wskaźnik na tablicę stolików
+extern int *sygnal_kierownika;                                 // wskaźnik na sygnał kierownika
+extern int *restauracja_otwarta;                               // wskaźnik na stan restauracji
+extern int *kuchnia_dania_wydane;                              // liczba wydanych dań przez kuchnię
+extern int *kasa_dania_sprzedane;                              // liczba sprzedanych dań przez kasę
+extern int *tasma;                                             // tablica reprezentująca taśmę
+static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
+static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
+
 // ====== SEMAPHORE IDS ======
 #define SEM_KOLEJKA 0
 #define SEM_STOLIKI 1
@@ -49,7 +61,7 @@ struct Grupa
 
 struct Kolejka
 {
-    pid_t q[MAX_KOLEJKA];
+    struct Grupa q[MAX_KOLEJKA];
     int przod, tyl, ilosc;
 };
 
@@ -81,14 +93,13 @@ void sem_op(int sem, int val);
  * Adds a group to the queue
  * @param pid - process ID of group
  */
-void push(pid_t pid);
+void push(struct Grupa g);
 
 /**
  * Removes a group from the queue
- * @param pid - pointer to process ID
- * @return 1 if successful, 0 if queue is empty
+ * @return struct Grupa (empty if queue is empty - proces_id == 0)
  */
-int pop(pid_t *pid);
+struct Grupa pop(void);
 
 /**
  * Client process - generates customer groups
@@ -114,7 +125,6 @@ void generator_klientow(void);
 void generator_stolikow(struct Stolik *stoliki);
 void przesun_tasme_cyklicznie(int *tasma);
 void dodaj_danie(int *tasma, int cena);
-void klient_sprawdz_i_bierz(struct Grupa *g, int *tasma);
 void przydziel_stolik(struct Grupa *g);
 
 #endif // RESTAURACJA_H

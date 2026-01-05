@@ -1,6 +1,6 @@
 #include "restauracja.h"
 
-// ====== ZMIENNE GLOBALNE ======
+// ====== ZMIENNE GLOBALNE (DEFINICJE) ======
 int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
 struct Kolejka *kolejka;   // wskaźnik na kolejkę
 struct Stolik *stoliki;    // wskaźnik na tablicę stolików
@@ -9,8 +9,6 @@ int *restauracja_otwarta;  // wskaźnik na stan restauracji
 int *kuchnia_dania_wydane; // liczba wydanych dań przez kuchnię
 int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
 int *tasma;                // tablica reprezentująca taśmę
-// static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
-// static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
 
 // ====== MAIN ======
 int main()

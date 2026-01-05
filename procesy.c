@@ -1,17 +1,5 @@
 #include "restauracja.h"
 
-// ====== GLOBALNE ZMIENNE WSPÓŁDZIELONE ======
-extern int shm_id, sem_id;                           // ID pamięci współdzielonej i semaforów
-extern struct Kolejka *kolejka;                      // wskaźnik na kolejkę
-extern struct Stolik *stoliki;                       // wskaźnik na tablicę stolików
-extern int *tasma;                                   // wskaźnik na taśmę
-extern int *sygnal_kierownika;                       // wskaźnik na sygnał kierownika
-extern int *restauracja_otwarta;                     // wskaźnik na stan restauracji
-static const int ILOSC_STOLIKOW[4] = {5, 5, 3, 2};   // liczba stolików o pojemności 1,2,3,4
-static const int CENY_DAN[6] = {15, 20, 40, 50, 60}; // ceny dań;
-extern int *kuchnia_dania_wydane;                    // liczba wydanych dań przez kuchnię
-extern int *kasa_dania_sprzedane;                    // liczba sprzedanych dań przez kasę
-
 // ====== PROCES KLIENT ======
 void klient()
 {
@@ -49,11 +37,11 @@ void klient()
     else
     {
         // === NORMALNY ===
-        push(g.proces_id); // kolejka FIFO
+        push(g); // kolejka FIFO
         printf("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n", g.proces_id, g.osoby, g.dorosli, g.dzieci, g.vip ? " [VIP]" : "");
         // oczekiwanie na przydział stolika
         pid_t moj_proces_id = g.proces_id;
-        while (g.stolik_przydzielony == -1)
+        while (g.stolik_przydzielony == -1 && *restauracja_otwarta)
         {
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
@@ -68,12 +56,18 @@ void klient()
             sem_op(SEM_STOLIKI, 1);
             sleep(1);
         }
+
+        // Jeśli restauracja została zamknięta przed przydziałem stolika
+        if (g.stolik_przydzielony == -1)
+        {
+            printf("Grupa %d opuszcza kolejkę - restauracja zamknięta\n", g.proces_id);
+            exit(0);
+        }
     }
 
     // === CZEKANIE NA DANIA ===
     int dania_pobrane = 0;
     int dania_do_pobrania = rand() % 8 + 3; // losowa liczba dań do pobrania (3-10)
-    // time_t czas_start = time(NULL);
 
     while (dania_pobrane < dania_do_pobrania)
     {
@@ -107,28 +101,18 @@ void klient()
     {
         if (g.pobrane_dania[i] == 0)
             continue;
-        int ilosc_dan = g.pobrane_dania[i];
-        int kwota = ilosc_dan * CENY_DAN[i];
-        kasa_dania_sprzedane[i] += ilosc_dan;
-        printf("Grupa %d płaci za %d dań za %d zł każde, łącznie: %d zł\n", g.proces_id, ilosc_dan, CENY_DAN[i], kwota);
+        int kwota = g.pobrane_dania[i] * CENY_DAN[i];
+        kasa_dania_sprzedane[i] += g.pobrane_dania[i];
+        printf("Grupa %d płaci za %d dań za %d zł każde, łącznie: %d zł\n", g.proces_id, g.pobrane_dania[i], CENY_DAN[i], kwota);
     }
-
     sem_op(SEM_TASMA, 1);
 
     // === WYJŚCIE ===
     sem_op(SEM_STOLIKI, -1);
-    for (int i = 0; i < MAX_STOLIKI; i++)
-    {
-        if (stoliki[i].proces_id == g.proces_id)
-        {
-            printf("Grupa %d przy stoliku %d opuszcza restaurację.\n", g.proces_id, i);
-            stoliki[i].proces_id = 0;
-            break;
-        }
-    }
+    printf("Grupa %d przy stoliku %d opuszcza restaurację.\n", g.proces_id, g.stolik_przydzielony);
+    stoliki[g.stolik_przydzielony].proces_id = 0;
     sem_op(SEM_STOLIKI, 1);
-
-    exit(0);
+    exit(0); // koniec procesu klienta
 }
 
 void generator_klientow()
@@ -147,6 +131,7 @@ void generator_klientow()
 
         sleep(rand() % 3 + 1); // losowe przyjścia
     }
+    exit(0); // zakończenie generatora klientów
 }
 
 // ====== OBSŁUGA ======
@@ -161,21 +146,40 @@ void obsluga()
             wydajnosc = 2;
             printf("Zwiększona wydajność obsługi!\n");
         }
-        if (*sygnal_kierownika == 2)
+        else if (*sygnal_kierownika == 2)
         {
             wydajnosc = 0.5;
             printf("Zmniejszona wydajność obsługi!\n");
         }
-        if (*sygnal_kierownika == 3) // sygnał do zamknięcia restauracji
+        else if (*sygnal_kierownika == 3) // sygnał do zamknięcia restauracji
         {
             printf("Kierownik zamyka restaurację!\n");
             *restauracja_otwarta = 0;
+
+            // Zamknięcie wszystkich procesów klientów przy stolikach
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
-                stoliki[i].proces_id = 0;
+            {
+                if (stoliki[i].proces_id != 0)
+                {
+                    printf("Zamykanie procesu klienta %d przy stoliku %d\n", stoliki[i].proces_id, i);
+                    kill(stoliki[i].proces_id, SIGTERM);
+                    stoliki[i].proces_id = 0;
+                }
+            }
             sem_op(SEM_STOLIKI, 1);
 
+            // Zamknięcie wszystkich procesów w kolejce
             sem_op(SEM_KOLEJKA, -1);
+            for (int i = 0; i < kolejka->ilosc; i++)
+            {
+                int idx = (kolejka->przod + i) % MAX_KOLEJKA;
+                if (kolejka->q[idx].proces_id != 0)
+                {
+                    printf("Zamykanie procesu klienta %d z kolejki\n", kolejka->q[idx].proces_id);
+                    kill(kolejka->q[idx].proces_id, SIGTERM);
+                }
+            }
             kolejka->ilosc = 0;
             sem_op(SEM_KOLEJKA, 1);
         }
@@ -185,22 +189,22 @@ void obsluga()
         }
 
         // obsługa grup w kolejce //
-
-        pid_t pid_z_kolejki;     // obsługa grup z kolejki
-        if (pop(&pid_z_kolejki)) // jeśli jest grupa w kolejce
+        struct Grupa g = pop(); // obsługa grup z kolejki
+        if (g.proces_id != 0)   // jeśli jest grupa w kolejce (proces_id != 0)
         {
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].proces_id == 0)
+                if (stoliki[i].proces_id == 0 && stoliki[i].pojemnosc == g.osoby) // przydzielamy stolik
                 {
-                    stoliki[i].proces_id = pid_z_kolejki;
-                    printf("Grupa usadzona: PID %d przy stoliku: %d\n", pid_z_kolejki, i);
+                    stoliki[i].proces_id = g.proces_id;
+                    printf("Grupa usadzona: PID %d przy stoliku: %d\n", g.proces_id, stoliki[i].numer_stolika);
                     break;
                 }
             }
             sem_op(SEM_STOLIKI, 1);
         }
+
         // podawanie dań na taśmę //
         for (int i = 0; i < wydajnosc; i++)
         {
@@ -215,6 +219,30 @@ void obsluga()
 
         sleep(1);
     }
+
+    // PODSUMOWANIE KASY
+    printf("\n=== PODSUMOWANIE KASY ===\n");
+    int kasa_suma = 0;
+    for (int i = 0; i < 6; i++)
+    {
+        printf("Kasa - liczba sprzedanych dań za %d zł: %d\n", CENY_DAN[i], kasa_dania_sprzedane[i]);
+        kasa_suma += kasa_dania_sprzedane[i] * CENY_DAN[i];
+    }
+    printf("Suma: %d zł\n", kasa_suma);
+
+    printf("\n=== PODSUMOWANIE OBSŁUGI ===\n");
+
+    for (int i = 0; i < MAX_TASMA; i++)
+    {
+        if (tasma[i] != 0)
+        {
+            printf("Na taśmie pozostało danie za %d zł na pozycji %d\n", tasma[i], i);
+        }
+    }
+    printf("\n");
+
+    printf("Obsługa kończy pracę.\n");
+
     exit(0);
 }
 
@@ -225,6 +253,8 @@ void kucharz()
     {
         sleep(2);
     }
+    // PODSUMOWANIE KUCHNI
+    printf("\n=== PODSUMOWANIE KUCHNI ===\n");
     int kuchnia_suma = 0;
     for (int i = 0; i < 6; i++)
     {
@@ -233,20 +263,20 @@ void kucharz()
         kuchnia_suma += kuchnia_dania_wydane[i] * CENY_DAN[i];
     }
     printf("\n=== PODSUMOWANIE KUCHNI ===\nSuma: %d zł\n", kuchnia_suma);
+
+    printf("Kucharz kończy pracę.\n");
     exit(0);
 }
 
 // ====== KIEROWNIK ======
 void kierownik()
 {
-    while (*restauracja_otwarta)
+    do
     {
-        *sygnal_kierownika = 0; // normalna praca
-
         sleep(10);
-        *sygnal_kierownika = rand() % 4; // losowa zmiana sygnału
+        *sygnal_kierownika = rand() % 5; // losowa zmiana sygnału kierownika (0
         printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
-    }
+    } while (*restauracja_otwarta);
     exit(0);
 }
 
@@ -258,92 +288,67 @@ void sem_op(int sem, int val) // wykonanie operacji na semaforze, val = +1 (zwol
 }
 
 // ====== KOLEJKA ======
-void push(pid_t pid)
+void push(struct Grupa g)
 {
     sem_op(SEM_KOLEJKA, -1);          // zablokowanie semafora
     if (kolejka->ilosc < MAX_KOLEJKA) // sprawdzenie czy jest miejsce w kolejce
     {
-        kolejka->q[kolejka->tyl] = pid;                  // dodanie pid na koniec kolejki
+        kolejka->q[kolejka->tyl] = g;                    // dodanie grupy na koniec kolejki
         kolejka->tyl = (kolejka->tyl + 1) % MAX_KOLEJKA; // przesunięcie tylu
         kolejka->ilosc++;                                // zwiększenie ilości grup w kolejce
     }
     sem_op(SEM_KOLEJKA, 1); // zwolnienie semafora
 }
 
-int pop(pid_t *pid)
+struct Grupa pop(void)
 {
+    struct Grupa g = {0};    // Inicjalizacja do zera/puste
     sem_op(SEM_KOLEJKA, -1); // zablokowanie semafora
     if (kolejka->ilosc == 0) // sprawdzenie czy kolejka jest pusta
     {
         sem_op(SEM_KOLEJKA, 1); // zwolnienie semafora
-        return 0;
+        return g;               // Zwróć pusty struct
     }
-    *pid = kolejka->q[kolejka->przod];                   // pobranie pid z przodu kolejki
+    g = kolejka->q[kolejka->przod];                      // pobranie pid z przodu kolejki
     kolejka->przod = (kolejka->przod + 1) % MAX_KOLEJKA; // przesunięcie przodu
     kolejka->ilosc--;                                    // zmniejszenie ilości grup w kolejce
     sem_op(SEM_KOLEJKA, 1);                              // zwolnienie semafora
-    return 1;
+    return g;
 }
 
 void generator_stolikow(struct Stolik *stoliki)
 {
-    int idx = 1;
+    int idx = 0;
 
     for (int i = 0; i < 4; i++)
     {
         for (int j = 0; j < ILOSC_STOLIKOW[i]; j++)
         {
-            stoliki[idx].numer_stolika = idx;
+            idx = i * ILOSC_STOLIKOW[i] + j;
+            stoliki[idx].numer_stolika = idx + 1;
             stoliki[idx].pojemnosc = i + 1;
             stoliki[idx].proces_id = 0;
 
             printf("Stolik %d o pojemności %d utworzony.\n",
                    stoliki[idx].numer_stolika,
                    stoliki[idx].pojemnosc);
-
-            idx++; // przechodzimy do kolejnego stolika
         }
     }
 }
 
-void przesun_tasme_cyklicznie(int *tasma)
-{
-    int ostatni = tasma[MAX_STOLIKI - 1];
-
-    for (int i = MAX_STOLIKI - 1; i > 0; i--)
-    {
-        tasma[i] = tasma[i - 1];
-    }
-
-    tasma[0] = ostatni; // WRACA NA POCZĄTEK
-}
-
 void dodaj_danie(int *tasma, int cena)
 {
-    przesun_tasme_cyklicznie(tasma);
+    do
+    {
+        int ostatni = tasma[MAX_STOLIKI - 1];
+
+        for (int i = MAX_STOLIKI - 1; i > 0; i--)
+        {
+            tasma[i] = tasma[i - 1];
+        }
+
+        tasma[0] = ostatni; // WRACA NA POCZĄTEK
+    } while (tasma[0] != 0);
     tasma[0] = cena;
     printf("Danie za %d zł dodane na taśmę.\n", cena);
-}
-
-void klient_sprawdz_i_bierz(struct Grupa *g, int *tasma)
-{
-    int s = g->stolik_przydzielony;
-
-    if (tasma[s] != 0)
-    {
-        int cena = tasma[s];
-
-        if (cena == 10)
-            g->pobrane_dania[0]++;
-        else if (cena == 15)
-            g->pobrane_dania[1]++;
-        else if (cena == 20)
-            g->pobrane_dania[2]++;
-        tasma[s] = 0; // talerz zabrany
-        printf("Grupa %d przy stoliku %d pobrała danie za %d zł\n", g->proces_id, s, cena);
-    }
-}
-
-void przydziel_stolik(struct Grupa *g)
-{
 }
