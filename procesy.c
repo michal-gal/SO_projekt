@@ -3,6 +3,9 @@
 // ====== PROCES KLIENT ======
 void klient()
 {
+    // Ustaw timeout - jeśli proces będzie działał dłużej niż 30 sekund, wymuś jego zakończenie
+    alarm(30);
+
     struct Grupa g;
 
     g.proces_id = getpid();
@@ -68,9 +71,17 @@ void klient()
     // === CZEKANIE NA DANIA ===
     int dania_pobrane = 0;
     int dania_do_pobrania = rand() % 8 + 3; // losowa liczba dań do pobrania (3-10)
+    time_t czas_start_dania = time(NULL);
+    int timeout_dania = 20; // 20 sekund na pobranie dań
 
-    while (dania_pobrane < dania_do_pobrania)
+    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta)
     {
+        if (time(NULL) - czas_start_dania > timeout_dania)
+        {
+            printf("Grupa %d timeout czekania na dania - kończy się\n", g.proces_id);
+            break;
+        }
+
         sem_op(SEM_TASMA, -1);
         if (tasma[g.stolik_przydzielony] != 0)
         {
@@ -87,6 +98,7 @@ void klient()
                    g.proces_id, g.stolik_przydzielony, cena, dania_pobrane + 1, dania_do_pobrania);
             dania_pobrane++;
             tasma[g.stolik_przydzielony] = 0; // talerz zabrany
+            czas_start_dania = time(NULL);    // reset timera po pobraniu dania
         }
         sem_op(SEM_TASMA, 1);
         sleep(1); // czekaj na kolejne danie
@@ -113,6 +125,7 @@ void klient()
     stoliki[g.stolik_przydzielony].proces_id = 0;
     sem_op(SEM_STOLIKI, 1);
     exit(0); // koniec procesu klienta
+    aktywni_klienci--;
 }
 
 void generator_klientow()
@@ -122,6 +135,7 @@ void generator_klientow()
     while (*restauracja_otwarta)
     {
         pid_t pid = fork();
+        aktywni_klienci++;
 
         if (pid == 0)
         {
@@ -129,15 +143,21 @@ void generator_klientow()
             exit(0);
         }
 
-        sleep(rand() % 3 + 1); // losowe przyjścia
+        // Zamiast jednego długiego sleep, robimy wiele krótkich aby szybciej reagować
+        int czas_oczekiwania = rand() % 3 + 1;
+        for (int i = 0; i < czas_oczekiwania * 10 && *restauracja_otwarta; i++)
+        {
+            usleep(100000); // 0.1 sekundy
+        }
     }
+    printf("Generator klientów kończy pracę.\n");
     exit(0); // zakończenie generatora klientów
 }
 
 // ====== OBSŁUGA ======
 void obsluga()
 {
-    while (*restauracja_otwarta)
+    while (*aktywni_klienci > 0 || *restauracja_otwarta) // dopóki są aktywni klienci lub restauracja jest otwarta
     {
         // sprawdzanie sygnału kierownika //
         int wydajnosc = 1;
@@ -146,12 +166,12 @@ void obsluga()
             wydajnosc = 2;
             printf("Zwiększona wydajność obsługi!\n");
         }
-        else if (*sygnal_kierownika == 2)
+        if (*sygnal_kierownika == 2)
         {
             wydajnosc = 0.5;
             printf("Zmniejszona wydajność obsługi!\n");
         }
-        else if (*sygnal_kierownika == 3) // sygnał do zamknięcia restauracji
+        if (*sygnal_kierownika == 3) // sygnał do zamknięcia restauracji
         {
             printf("Kierownik zamyka restaurację!\n");
             *restauracja_otwarta = 0;
@@ -271,12 +291,13 @@ void kucharz()
 // ====== KIEROWNIK ======
 void kierownik()
 {
-    do
+    while (*restauracja_otwarta)
     {
         sleep(10);
-        *sygnal_kierownika = rand() % 5; // losowa zmiana sygnału kierownika (0
+        *sygnal_kierownika = rand() % 5; // losowa zmiana sygnału kierownika (0-4)
         printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
-    } while (*restauracja_otwarta);
+    }
+    printf("Kierownik kończy pracę.\n");
     exit(0);
 }
 

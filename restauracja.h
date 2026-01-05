@@ -27,7 +27,7 @@
 #define MAX_STOLIKI (X1 + X2 + X3 + X4)
 #define MAX_KOLEJKA 500
 #define MAX_TASMA 50
-#define CZAS_PRACY 30
+#define CZAS_PRACY 20
 
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;                                     // ID pamięci współdzielonej i semaforów
@@ -35,6 +35,7 @@ extern struct Kolejka *kolejka;                                // wskaźnik na k
 extern struct Stolik *stoliki;                                 // wskaźnik na tablicę stolików
 extern int *sygnal_kierownika;                                 // wskaźnik na sygnał kierownika
 extern int *restauracja_otwarta;                               // wskaźnik na stan restauracji
+extern int *aktywni_klienci;                                   // wskaźnik na liczbę aktywnych klientów
 extern int *kuchnia_dania_wydane;                              // liczba wydanych dań przez kuchnię
 extern int *kasa_dania_sprzedane;                              // liczba sprzedanych dań przez kasę
 extern int *tasma;                                             // tablica reprezentująca taśmę
