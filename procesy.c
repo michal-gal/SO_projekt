@@ -1,4 +1,16 @@
-#include "restauracja.h"
+#include "procesy.h"
+
+// ====== ZMIENNE GLOBALNE (DEFINICJE) ======
+int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
+struct Kolejka *kolejka;   // wskaźnik na kolejkę
+struct Stolik *stoliki;    // wskaźnik na tablicę stolików
+int *sygnal_kierownika;    // wskaźnik na sygnał kierownika
+int *restauracja_otwarta;  // wskaźnik na stan restauracji
+int *aktywni_klienci;      // wskaźnik na liczbę aktywnych klientów
+int *kuchnia_dania_wydane; // liczba wydanych dań przez kuchnię
+int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
+int *tasma;                // tablica reprezentująca taśmę
+pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 
 // ====== PROCES KLIENT ======
 void klient()
@@ -98,9 +110,8 @@ void klient()
         sleep(1); // czekaj na kolejne danie
     }
 
-    printf("Grupa %d przy stoliku %d gotowa do płatności (pobrała %d dań)\n", g.proces_id, stoliki[g.stolik_przydzielony].numer_stolika, dania_pobrane);
-
     // === PŁATNOŚĆ ===
+    printf("Grupa %d przy stoliku %d gotowa do płatności (pobrała %d dań)\n", g.proces_id, stoliki[g.stolik_przydzielony].numer_stolika, dania_pobrane);
     sem_op(SEM_TASMA, -1);
     // zaplacaenie za pobrane dania
     for (int i = 0; i < 6; i++)
@@ -119,11 +130,11 @@ void klient()
     stoliki[g.stolik_przydzielony].proces_id = 0;
     sem_op(SEM_STOLIKI, 1);
 
-    // Klient kończy – dekrementuj licznik aktywnych klientów
     sem_op(SEM_KOLEJKA, -1);
     if (*aktywni_klienci > 0)
         (*aktywni_klienci)--;
     sem_op(SEM_KOLEJKA, 1);
+
     exit(0); // koniec procesu klienta
 }
 
@@ -147,13 +158,7 @@ void generator_klientow()
             (*aktywni_klienci)++;
             sem_op(SEM_KOLEJKA, 1);
         }
-        sleep(rand() % 3 + 1); //
-        // Zamiast jednego długiego sleep, robimy wiele krótkich aby szybciej reagować
-        // int czas_oczekiwania = rand() % 3 + 1;
-        //  for (int i = 0; i < czas_oczekiwania * 10 && *restauracja_otwarta; i++)
-        //{
-        //  usleep(100000); // 0.1 sekundy
-        //}
+        sleep(rand() % 3 + 1); // losowy czas między generowaniem grup (1-3 sekundy)
     }
     printf("Generator klientów kończy pracę.\n");
     exit(0); // zakończenie generatora klientów
@@ -162,35 +167,8 @@ void generator_klientow()
 // ====== OBSŁUGA ======
 void obsluga()
 {
-    while (*aktywni_klienci > 0 || *restauracja_otwarta) // dopóki są aktywni klienci lub restauracja jest otwarta
+    while (*restauracja_otwarta)
     {
-        // Jeśli restauracja zamknięta, a brak klientów w kolejce i przy stolikach, wyjdź bez czekania na błędny licznik
-        if (!*restauracja_otwarta)
-        {
-            int kolejka_pusta;
-            int stoliki_zajete = 0;
-
-            sem_op(SEM_KOLEJKA, -1);
-            kolejka_pusta = (kolejka->ilosc == 0);
-            sem_op(SEM_KOLEJKA, 1);
-
-            sem_op(SEM_STOLIKI, -1);
-            for (int i = 0; i < MAX_STOLIKI; i++)
-            {
-                if (stoliki[i].proces_id != 0)
-                    stoliki_zajete++;
-            }
-            sem_op(SEM_STOLIKI, 1);
-
-            if (kolejka_pusta && stoliki_zajete == 0)
-            {
-                sem_op(SEM_KOLEJKA, -1);
-                *aktywni_klienci = 0; // zbij ewentualny błędny licznik
-                sem_op(SEM_KOLEJKA, 1);
-                break;
-            }
-        }
-
         // sprawdzanie sygnału kierownika //
         int wydajnosc = 1;
         if (*sygnal_kierownika == 1)
@@ -279,6 +257,11 @@ void obsluga()
         sleep(1);
     }
 
+    while (*aktywni_klienci > 0)
+    {
+        sleep(1);
+    }
+
     // PODSUMOWANIE KASY
     printf("\n=== PODSUMOWANIE KASY ===\n");
     int kasa_suma = 0;
@@ -331,32 +314,7 @@ void kucharz()
 {
     while (*restauracja_otwarta || *aktywni_klienci > 0)
     {
-        if (!*restauracja_otwarta)
-        {
-            int kolejka_pusta;
-            int stoliki_zajete = 0;
-
-            sem_op(SEM_KOLEJKA, -1);
-            kolejka_pusta = (kolejka->ilosc == 0);
-            sem_op(SEM_KOLEJKA, 1);
-
-            sem_op(SEM_STOLIKI, -1);
-            for (int i = 0; i < MAX_STOLIKI; i++)
-            {
-                if (stoliki[i].proces_id != 0)
-                    stoliki_zajete++;
-            }
-            sem_op(SEM_STOLIKI, 1);
-
-            if (kolejka_pusta && stoliki_zajete == 0)
-            {
-                sem_op(SEM_KOLEJKA, -1);
-                *aktywni_klienci = 0;
-                sem_op(SEM_KOLEJKA, 1);
-                break;
-            }
-        }
-        sleep(2);
+        sleep(1);
     }
     // PODSUMOWANIE KUCHNI
     printf("\n=== PODSUMOWANIE KUCHNI ===\n");
@@ -380,10 +338,16 @@ void kierownik()
 {
     while (*restauracja_otwarta)
     {
-        *sygnal_kierownika = rand() % 10; // losowa zmiana sygnału kierownika
+        *sygnal_kierownika = rand() % 20; // losowa zmiana sygnału kierownika
         printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
-        sleep(2);
+        sleep(1);
     }
+
+    while (*aktywni_klienci > 0)
+    {
+        sleep(1);
+    }
+
     printf("Kierownik kończy pracę.\n");
     exit(0);
 }
@@ -424,6 +388,7 @@ struct Grupa pop(void)
     return g;
 }
 
+// ====== GENERATOR STOLIKÓW ======
 void generator_stolikow(struct Stolik *stoliki)
 {
     int idx = 0;
@@ -449,6 +414,7 @@ void generator_stolikow(struct Stolik *stoliki)
     }
 }
 
+// ====== TAŚMA ======
 void dodaj_danie(int *tasma, int cena)
 {
     do
@@ -464,4 +430,34 @@ void dodaj_danie(int *tasma, int cena)
     } while (tasma[0] != 0);
     tasma[0] = cena;
     printf("Danie za %d zł dodane na taśmę.\n", cena);
+}
+
+// ====== IPC ======
+void stworz_ipc(void)
+{
+    srand(time(NULL));
+    int bufor = sizeof(struct Kolejka) +              // kolejka
+                sizeof(struct Stolik) * MAX_STOLIKI + // stoliki
+                sizeof(int) * MAX_TASMA +             // taśma
+                sizeof(int) * 6 * 2 +                 // kuchnia i kasa - liczba dań
+                sizeof(int) * 3 +                     // sygnał kierownika i stan restauracji, i aktywni klienci
+                sizeof(int) * 6;                      // pobrane dania
+
+    shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0666); // utworzenie pamięci współdzielonej
+    void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);   // dołączenie pamięci współdzielonej
+    memset(pamiec_wspoldzielona, 0, bufor);                // wyzerowanie pamięci
+
+    kolejka = pamiec_wspoldzielona;
+    stoliki = (void *)(kolejka + 1);
+    tasma = (int *)(stoliki + MAX_STOLIKI);
+    kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);
+    kasa_dania_sprzedane = kuchnia_dania_wydane + 6;
+    sygnal_kierownika = kasa_dania_sprzedane + 6;
+    restauracja_otwarta = sygnal_kierownika + 1;
+    aktywni_klienci = restauracja_otwarta + 1;
+
+    sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0666); // utworzenie zestawu semaforów
+    semctl(sem_id, SEM_KOLEJKA, SETVAL, 1);            // inicjalizacja semaforów
+    semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
+    semctl(sem_id, SEM_TASMA, SETVAL, 1);
 }

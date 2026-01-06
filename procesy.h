@@ -1,5 +1,5 @@
-#ifndef RESTAURACJA_H
-#define RESTAURACJA_H
+#ifndef PROCESY_H
+#define PROCESY_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +12,7 @@
 #include <string.h>
 #include <sys/wait.h>
 
-// ====== CONSTANTS ======
+// ====== STAŁE ======
 #define X1 10
 #define X2 8
 #define X3 5
@@ -41,13 +41,14 @@ extern int *kasa_dania_sprzedane;                              // liczba sprzeda
 extern int *tasma;                                             // tablica reprezentująca taśmę
 static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
 static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
+extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 
-// ====== SEMAPHORE IDS ======
+// ====== SEMAFORY IDS ======
 #define SEM_KOLEJKA 0
 #define SEM_STOLIKI 1
 #define SEM_TASMA 2
 
-// ====== STRUCTURES ======
+// ====== STRUKTURY ======
 struct Grupa
 {
     pid_t proces_id;
@@ -72,14 +73,6 @@ struct Stolik
     int pojemnosc;
     pid_t proces_id;
 };
-
-// ====== GLOBAL VARIABLES ======
-extern int shm_id, sem_id;
-extern struct Kolejka *kolejka;
-extern struct Stolik *stoliki;
-extern int *sygnal_kierownika;
-extern int *restauracja_otwarta;
-extern int *tasma;
 
 // ====== FUNCTION DECLARATIONS ======
 
@@ -122,9 +115,32 @@ void kucharz(void);
  */
 void kierownik(void);
 
+/**
+ * Client generator process - spawns client processes
+ */
 void generator_klientow(void);
+
+/**
+ * Table generator - initializes tables
+ */
 void generator_stolikow(struct Stolik *stoliki);
+
+/**
+ * Adds a dish to the conveyor belt
+ * @param tasma - conveyor belt array
+ * @param cena - price of the dish
+ */
 void dodaj_danie(int *tasma, int cena);
+
+/**
+ * Assigns a table to a group
+ * @param g - pointer to the group structure
+ */
 void przydziel_stolik(struct Grupa *g);
 
-#endif // RESTAURACJA_H
+/**
+ * Creates IPC resources (shared memory and semaphores)
+ */
+void stworz_ipc(void);
+
+#endif // PROCESY_H

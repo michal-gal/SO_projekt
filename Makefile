@@ -3,7 +3,7 @@ CFLAGS = -Wall -g
 LDFLAGS = -pthread
 TARGET = restauracja
 SOURCES = restauracja.c procesy.c
-HEADERS = restauracja.h 
+HEADERS = procesy.h 
 OBJECTS = $(SOURCES:.c=.o)
 
 all: $(TARGET)
