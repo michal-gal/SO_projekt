@@ -95,10 +95,21 @@ int main()
 
     sleep(CZAS_PRACY);
     *restauracja_otwarta = 0;
+    printf("\n===Czas pracy restauracji minął!===\n");
+    fflush(stdout); // upewnij się że komunikaty zostały wydrukowane
 
     printf("Zamykanie restauracji...\n");
-    sleep(1);       // Daj czas na zakończenie generatora i ostatnich klientów
-    fflush(stdout); // upewnij się że komunikat został wydrukowany
+    // Daj chwilę na naturalne zakończenie klientów zanim zamkniemy procesy główne
+    time_t koniec_klienci_start = time(NULL);
+    while (*aktywni_klienci > 0 && time(NULL) - koniec_klienci_start < 5) // czekaj maksymalnie 5 sekund
+    {
+        printf("Czekam na klientów: %d\n", *aktywni_klienci);
+        fflush(stdout);
+        usleep(200000); // 200 ms
+    }
+
+    sleep(1);       // dodatkowy mały bufor
+    fflush(stdout); // upewnij się że komunikaty zostały wydrukowane
 
     // Czekanie na zakończenie wszystkich procesów potomnych z timeoutem
     time_t czas_start = time(NULL);

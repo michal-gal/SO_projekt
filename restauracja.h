@@ -124,7 +124,6 @@ void kierownik(void);
 
 void generator_klientow(void);
 void generator_stolikow(struct Stolik *stoliki);
-void przesun_tasme_cyklicznie(int *tasma);
 void dodaj_danie(int *tasma, int cena);
 void przydziel_stolik(struct Grupa *g);
 
