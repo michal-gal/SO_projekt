@@ -13,10 +13,10 @@
 #include <sys/wait.h>
 
 // ====== STAŁE ======
-#define X1 10
-#define X2 8
-#define X3 5
-#define X4 3
+#define X1 20
+#define X2 22
+#define X3 53
+#define X4 32
 #define p10 10
 #define p15 15
 #define p20 20
@@ -26,8 +26,8 @@
 #define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4)
 #define MAX_STOLIKI (X1 + X2 + X3 + X4)
 #define MAX_KOLEJKA 500
-#define MAX_TASMA 50
-#define CZAS_PRACY 20
+#define MAX_TASMA 500
+#define CZAS_PRACY 60
 
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;                                     // ID pamięci współdzielonej i semaforów

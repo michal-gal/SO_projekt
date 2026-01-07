@@ -55,15 +55,18 @@ int main()
         exit(1);
     }
 
-    sleep(CZAS_PRACY);
+    // Czekaj maksymalnie CZAS_PRACY lub do sygnału zamknięcia (np. sygnał 3 od kierownika)
+    time_t start_czekania = time(NULL);
+    while (time(NULL) - start_czekania < CZAS_PRACY && *restauracja_otwarta)
+    {
+        sleep(1);
+    }
     *restauracja_otwarta = 0;
     printf("\n===Czas pracy restauracji minął!===\n");
-    printf("Zamykanie restauracji...\n");
     fflush(stdout); // upewnij się że komunikaty zostały wydrukowane
 
     // Daj chwilę na naturalne zakończenie klientów zanim zamkniemy procesy główne
     time_t koniec_klienci_start = time(NULL);
-    printf("\n");
     while (*aktywni_klienci > 0 && time(NULL) - koniec_klienci_start < 25) // czekaj maksymalnie 5 sekund
     {
         printf("\r/ Czekam na klientów: %d\r", *aktywni_klienci);

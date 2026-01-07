@@ -70,6 +70,13 @@ void klient()
         if (g.stolik_przydzielony == -1)
         {
             printf("Grupa %d opuszcza kolejkę - restauracja zamknięta\n", g.proces_id);
+
+            // DECREMENT COUNTER BEFORE EXITING!
+            sem_op(SEM_KOLEJKA, -1);
+            if (*aktywni_klienci > 0)
+                (*aktywni_klienci)--;
+            sem_op(SEM_KOLEJKA, 1);
+
             exit(0); // koniec procesu klienta
         }
     }
@@ -170,20 +177,21 @@ void obsluga()
     while (*restauracja_otwarta)
     {
         // sprawdzanie sygnału kierownika //
-        int wydajnosc = 1;
+        // bazowo 2 dania na iterację, spowolnienie -> 1, przyspieszenie -> 4
+        double wydajnosc = 2.0;
         if (*sygnal_kierownika == 1)
         {
-            wydajnosc = 2;
+            wydajnosc = 4.0;
             printf("Zwiększona wydajność obsługi!\n");
         }
         if (*sygnal_kierownika == 2)
         {
-            wydajnosc = 0.5;
+            wydajnosc = 1.0;
             printf("Zmniejszona wydajność obsługi!\n");
         }
         if (*sygnal_kierownika == 3) // sygnał do zamknięcia restauracji
         {
-            printf("Kierownik zamyka restaurację!\n");
+            printf("\n===Kierownik zamyka restaurację!===\n");
             *restauracja_otwarta = 0;
 
             // Zamknięcie wszystkich procesów klientów przy stolikach
@@ -195,6 +203,10 @@ void obsluga()
                     printf("Zamykanie procesu klienta %d przy stoliku %d\n", stoliki[i].proces_id, i);
                     kill(stoliki[i].proces_id, SIGTERM);
                     stoliki[i].proces_id = 0;
+                    sem_op(SEM_KOLEJKA, -1);
+                    if (*aktywni_klienci > 0)
+                        (*aktywni_klienci)--;
+                    sem_op(SEM_KOLEJKA, 1);
                 }
             }
             sem_op(SEM_STOLIKI, 1);
@@ -208,6 +220,8 @@ void obsluga()
                 {
                     printf("Zamykanie procesu klienta %d z kolejki\n", kolejka->q[idx].proces_id);
                     kill(kolejka->q[idx].proces_id, SIGTERM);
+                    if (*aktywni_klienci > 0)
+                        (*aktywni_klienci)--;
                 }
             }
             kolejka->ilosc = 0;
@@ -235,7 +249,8 @@ void obsluga()
             sem_op(SEM_STOLIKI, 1);
         }
 
-        // podawanie dań na taśmę //
+        // podawanie dań na taśmę (wydajność całkowita: 1/2/4)
+
         for (int i = 0; i < wydajnosc; i++)
         {
             int ceny[] = {p10, p15, p20};
@@ -243,7 +258,6 @@ void obsluga()
             sem_op(SEM_TASMA, -1);
             dodaj_danie(tasma, c);
             sem_op(SEM_TASMA, 1);
-            printf("Danie za %d zł podane na taśmę\n", c);
 
             // Inkrementuj licznik wydanych dań dla odpowiedniej ceny
             if (c == 10)
@@ -338,7 +352,7 @@ void kierownik()
 {
     while (*restauracja_otwarta)
     {
-        *sygnal_kierownika = rand() % 20; // losowa zmiana sygnału kierownika
+        *sygnal_kierownika = rand() % 50; // losowa zmiana sygnału kierownika
         printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
         sleep(1);
     }
