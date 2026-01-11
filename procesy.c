@@ -312,7 +312,7 @@ void obsluga()
         printf("Taśma - liczba niesprzedanych dań za %d zł: %d\n", CENY_DAN[i], tasma_dania_niesprzedane[i]);
         tasma_suma += tasma_dania_niesprzedane[i] * CENY_DAN[i];
     }
-    printf("===Suma: %d zł===\n", kasa_suma);
+    printf("===Suma: %d zł===\n", tasma_suma);
 
     printf("\n");
 
@@ -406,7 +406,12 @@ struct Grupa pop(void)
 void generator_stolikow(struct Stolik *stoliki)
 {
     int idx = 0;
-
+for (int i = 0; i < LADA; i++)
+    {
+        stoliki[i].numer_stolika = 0;
+        stoliki[i].pojemnosc = 0;
+        stoliki[i].proces_id = 0;
+    }
     for (int i = 0; i < 4; i++)
     {
         for (int j = 0; j < ILOSC_STOLIKOW[i]; j++)

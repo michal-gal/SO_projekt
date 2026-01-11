@@ -67,7 +67,7 @@ int main()
 
     // Daj chwilę na naturalne zakończenie klientów zanim zamkniemy procesy główne
     time_t koniec_klienci_start = time(NULL);
-    while (*aktywni_klienci > 0 && time(NULL) - koniec_klienci_start < 25) // czekaj maksymalnie 5 sekund
+    while (*aktywni_klienci > 0 && time(NULL) - koniec_klienci_start < 25) // czekaj maksymalnie 25 sekund
     {
         printf("\r/ Czekam na klientów: %d\r", *aktywni_klienci);
         fflush(stdout);

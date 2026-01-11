@@ -28,6 +28,7 @@
 #define MAX_KOLEJKA 500
 #define MAX_TASMA 500
 #define CZAS_PRACY 60
+#define LADA (MAX_TASMA - MAX_OSOBY)
 
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;                                     // ID pamięci współdzielonej i semaforów
