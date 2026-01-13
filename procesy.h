@@ -13,22 +13,25 @@
 #include <sys/wait.h>
 
 // ====== STAŁE ======
-#define X1 20
-#define X2 22
-#define X3 53
-#define X4 32
-#define p10 10
-#define p15 15
-#define p20 20
-#define p40 40
-#define p50 50
-#define p60 60
-#define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4)
-#define MAX_STOLIKI (X1 + X2 + X3 + X4)
-#define MAX_KOLEJKA 500
-#define MAX_TASMA 500
-#define CZAS_PRACY 60
-#define LADA (MAX_TASMA - MAX_OSOBY)
+#define X1 20                                         // liczba stolików o pojemności 1
+#define X2 22                                         // liczba stolików o pojemności 2
+#define X3 53                                         // liczba stolików o pojemności 3
+#define X4 32                                         // liczba stolików o pojemności 4
+#define p10 10                                        // ceny dań 1
+#define p15 15                                        // ceny dań 2
+#define p20 20                                        // ceny dań 3
+#define p40 40                                        // ceny dań 4
+#define p50 50                                        // ceny dań 5
+#define p60 60                                        // ceny dań 6
+#define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4) // maksymalna liczba osób przy stolikach
+#define MAX_STOLIKI (X1 + X2 + X3 + X4)               // maksymalna liczba stolików
+#define MAX_KOLEJKA 500                               // maksymalna liczba grup w kolejce
+#define MAX_TASMA 500                                 // maksymalna długość taśmy
+#define TP 10                                         // godzina otwarcia restauracji
+#define TK 22                                         // godzina zamknięcia restauracji
+#define CZAS_PRACY (TK - TP) * 5                      // czas otwarcia restauracji w sekundach
+#define REZERWA_TASMA 50
+#define LADA (MAX_TASMA - MAX_OSOBY - REZERWA_TASMA)
 
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;                                     // ID pamięci współdzielonej i semaforów
@@ -52,12 +55,12 @@ extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 // ====== STRUKTURY ======
 struct Grupa
 {
-    pid_t proces_id;
-    int osoby;
-    int dzieci;
-    int dorosli;
-    int vip;
-    int stolik_przydzielony;
+    pid_t proces_id;         // PID procesu grupy
+    int osoby;               // liczba osób w grupie
+    int dzieci;              // liczba dzieci
+    int dorosli;             // liczba dorosłych
+    int vip;                 // 1 jeśli VIP, 0 jeśli normalny
+    int stolik_przydzielony; // indeks stolika w tablicy stolików, -1 jeśli brak
     time_t wejscie;
     int pobrane_dania[6]; // liczba pobranych dań
 };

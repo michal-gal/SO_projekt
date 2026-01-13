@@ -1,5 +1,4 @@
-#include "procesy.h"
-#include <errno.h>
+#include "restauracja.h"
 
 // ====== MAIN ======
 int main()

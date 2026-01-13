@@ -405,13 +405,12 @@ struct Grupa pop(void)
 // ====== GENERATOR STOLIKÓW ======
 void generator_stolikow(struct Stolik *stoliki)
 {
+
+    //    stoliki[0].numer_stolika = 0;
+    //    stoliki[0].pojemnosc = LADA;
+    //    stoliki[0].proces_id = 0;
+
     int idx = 0;
-for (int i = 0; i < LADA; i++)
-    {
-        stoliki[i].numer_stolika = 0;
-        stoliki[i].pojemnosc = 0;
-        stoliki[i].proces_id = 0;
-    }
     for (int i = 0; i < 4; i++)
     {
         for (int j = 0; j < ILOSC_STOLIKOW[i]; j++)
