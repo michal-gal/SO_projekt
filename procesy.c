@@ -300,6 +300,15 @@ void obsluga()
                     tasma[0].stolik_specjalny = numer_stolika; // oznacz dla którego stolika jest danie
                     sem_op(SEM_TASMA, 1);
                     stoliki[i].grupa.danie_specjalne = 0; // zresetuj po dodaniu
+
+                    // Zwiększ licznik wydanych dań specjalnych
+                    if (cena_specjalna == 40)
+                        kuchnia_dania_wydane[3]++;
+                    else if (cena_specjalna == 50)
+                        kuchnia_dania_wydane[4]++;
+                    else if (cena_specjalna == 60)
+                        kuchnia_dania_wydane[5]++;
+
                     printf("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
                            cena_specjalna, numer_stolika);
                 }
