@@ -107,7 +107,7 @@ int main()
     sem_op(SEM_STOLIKI, -1);
     for (int i = 0; i < MAX_STOLIKI; i++)
     {
-        if (stoliki[i].proces_id != 0)
+        if (stoliki[i].grupa.proces_id != 0)
             stoliki_zajete++;
     }
     sem_op(SEM_STOLIKI, 1);

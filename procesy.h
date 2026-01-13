@@ -43,6 +43,7 @@ extern int *aktywni_klienci;                                   // wskaźnik na l
 extern int *kuchnia_dania_wydane;                              // liczba wydanych dań przez kuchnię
 extern int *kasa_dania_sprzedane;                              // liczba sprzedanych dań przez kasę
 extern struct Talerzyk *tasma;                                 // tablica reprezentująca taśmę
+extern int *kolej_podsumowania;                                // czyja kolej na podsumowanie (0=generator, 1=obsługa, 2=kucharz, 3=kierownik)
 static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
 static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
 extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
@@ -51,8 +52,8 @@ extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 #define SEM_KOLEJKA 0
 #define SEM_STOLIKI 1
 #define SEM_TASMA 2
+#define SEM_PRINT 3
 
-// ====== STRUKTURY ======
 struct Grupa
 {
     pid_t proces_id;         // PID procesu grupy
@@ -76,7 +77,6 @@ struct Stolik
 {
     int numer_stolika;
     int pojemnosc;
-    pid_t proces_id;
     struct Grupa grupa; // informacje o grupie przy stoliku
 };
 
