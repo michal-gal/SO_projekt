@@ -9,7 +9,7 @@ int *restauracja_otwarta;  // wskaźnik na stan restauracji
 int *aktywni_klienci;      // wskaźnik na liczbę aktywnych klientów
 int *kuchnia_dania_wydane; // liczba wydanych dań przez kuchnię
 int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
-int *tasma;                // tablica reprezentująca taśmę
+struct Talerzyk *tasma;    // tablica reprezentująca taśmę
 pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 
 // ====== PROCES KLIENT ======
@@ -25,6 +25,7 @@ void klient()
     g.vip = (rand() % 100 < 2);
     g.wejscie = time(NULL);
     memset(g.pobrane_dania, 0, sizeof(g.pobrane_dania));
+    g.danie_specjalne = 0;
 
     // === PRZYDZIAŁ STOLIKA ===
     if (g.vip)
@@ -36,6 +37,7 @@ void klient()
             if (stoliki[i].proces_id == 0 && stoliki[i].pojemnosc >= g.osoby)
             {
                 stoliki[i].proces_id = g.proces_id;
+                stoliki[i].grupa = g; // zapisz pełną strukturę grupy
                 printf("Grupa VIP %d usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g.proces_id, g.osoby, g.dorosli, g.dzieci, stoliki[i].numer_stolika);
                 g.stolik_przydzielony = i;
                 break;
@@ -85,33 +87,61 @@ void klient()
     int dania_pobrane = 0;                  // licznik pobranych dań
     int dania_do_pobrania = rand() % 8 + 3; // losowa liczba dań do pobrania (3-10)
     time_t czas_start_dania = time(NULL);
-    int timeout_dania = 20; // 20 sekund na pobranie dań
+    int timeout_dania = 5; // 20 sekund na pobranie dań
 
-    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta)
+    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta) // wyjdź jeśli restauracja zamknięta lub pobrano wszystkie dania
     {
-        if (time(NULL) - czas_start_dania > timeout_dania)
+        if (time(NULL) - czas_start_dania > timeout_dania * 4) // maksymalny czas oczekiwania na dania (2x timeout)
         {
             printf("Grupa %d timeout czekania na dania - kończy się\n", g.proces_id);
             break;
         }
 
-        sem_op(SEM_TASMA, -1);
-        if (tasma[g.stolik_przydzielony] != 0)
+        if (time(NULL) - czas_start_dania > timeout_dania && g.danie_specjalne == 0) // zamów danie specjalne, jesli przekroczono czas oczekiwania
         {
+            int ceny[] = {p40, p50, p60};
+            int c = ceny[rand() % 3];
+            g.danie_specjalne = c;
+            // Zapisz zamówienie w stoliku, żeby obsługa wiedziała
+            sem_op(SEM_STOLIKI, -1);
+            stoliki[g.stolik_przydzielony].grupa.danie_specjalne = c;
+            sem_op(SEM_STOLIKI, 1);
+            printf("Grupa %d zamawia danie specjalne za: %d zł. \n", g.proces_id, g.danie_specjalne);
+            czas_start_dania = time(NULL); // reset timera po zamówieniu
+        }
+
+        sem_op(SEM_TASMA, -1);
+        if (tasma[g.stolik_przydzielony].cena != 0)
+        {
+            if (tasma[g.stolik_przydzielony].stolik_specjalny != 0 &&
+                tasma[g.stolik_przydzielony].stolik_specjalny != stoliki[g.stolik_przydzielony].numer_stolika)
+            {
+                // danie specjalne dla innego stolika, pomiń
+                sem_op(SEM_TASMA, 1);
+                sleep(1);
+                continue;
+            }
             // pobierz danie z pozycji 0 taśmy
-            int cena = tasma[g.stolik_przydzielony];
+            int cena = tasma[g.stolik_przydzielony].cena;
             if (cena == 10)
                 g.pobrane_dania[0]++;
             else if (cena == 15)
                 g.pobrane_dania[1]++;
             else if (cena == 20)
                 g.pobrane_dania[2]++;
+            else if (cena == 40)
+                g.pobrane_dania[3]++;
+            else if (cena == 50)
+                g.pobrane_dania[4]++;
+            else if (cena == 60)
+                g.pobrane_dania[5]++;
 
             printf("Grupa %d przy stoliku %d pobrała danie za %d zł (pobrane: %d/%d)\n",
                    g.proces_id, stoliki[g.stolik_przydzielony].numer_stolika, cena, dania_pobrane + 1, dania_do_pobrania);
             dania_pobrane++;
-            tasma[g.stolik_przydzielony] = 0; // talerz zabrany
-            czas_start_dania = time(NULL);    // reset timera po pobraniu dania
+            tasma[g.stolik_przydzielony].cena = 0; // talerz zabrany
+            tasma[g.stolik_przydzielony].stolik_specjalny = 0;
+            czas_start_dania = time(NULL); // reset timera po pobraniu dania
         }
         sem_op(SEM_TASMA, 1);
         sleep(1); // czekaj na kolejne danie
@@ -215,11 +245,11 @@ void obsluga()
             sem_op(SEM_KOLEJKA, -1);
             for (int i = 0; i < kolejka->ilosc; i++)
             {
-                int idx = (kolejka->przod + i) % MAX_KOLEJKA;
-                if (kolejka->q[idx].proces_id != 0)
+                int j = (kolejka->przod + i) % MAX_KOLEJKA;
+                if (kolejka->q[j].proces_id != 0)
                 {
-                    printf("Zamykanie procesu klienta %d z kolejki\n", kolejka->q[idx].proces_id);
-                    kill(kolejka->q[idx].proces_id, SIGTERM);
+                    printf("Zamykanie procesu klienta %d z kolejki\n", kolejka->q[j].proces_id);
+                    kill(kolejka->q[j].proces_id, SIGTERM);
                     if (*aktywni_klienci > 0)
                         (*aktywni_klienci)--;
                 }
@@ -242,6 +272,7 @@ void obsluga()
                 if (stoliki[i].proces_id == 0 && stoliki[i].pojemnosc == g.osoby) // przydzielamy stolik
                 {
                     stoliki[i].proces_id = g.proces_id;
+                    stoliki[i].grupa = g; // zapisz pełną strukturę grupy
                     printf("Grupa usadzona: PID %d przy stoliku: %d\n", g.proces_id, stoliki[i].numer_stolika);
                     break;
                 }
@@ -258,14 +289,34 @@ void obsluga()
             sem_op(SEM_TASMA, -1);
             dodaj_danie(tasma, c);
             sem_op(SEM_TASMA, 1);
+            for (int i = 0; i < MAX_STOLIKI; i++)
+            {
+                if (stoliki[i].grupa.danie_specjalne != 0)
+                {
+                    int cena_specjalna = stoliki[i].grupa.danie_specjalne;
+                    int numer_stolika = stoliki[i].numer_stolika;
+                    sem_op(SEM_TASMA, -1);
+                    dodaj_danie(tasma, cena_specjalna);
+                    tasma[0].stolik_specjalny = numer_stolika; // oznacz dla którego stolika jest danie
+                    sem_op(SEM_TASMA, 1);
+                    stoliki[i].grupa.danie_specjalne = 0; // zresetuj po dodaniu
+                    printf("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
+                           cena_specjalna, numer_stolika);
+                }
+            }
 
-            // Inkrementuj licznik wydanych dań dla odpowiedniej ceny
             if (c == 10)
                 kuchnia_dania_wydane[0]++;
             else if (c == 15)
                 kuchnia_dania_wydane[1]++;
             else if (c == 20)
                 kuchnia_dania_wydane[2]++;
+            else if (c == 40)
+                kuchnia_dania_wydane[3]++;
+            else if (c == 50)
+                kuchnia_dania_wydane[4]++;
+            else if (c == 60)
+                kuchnia_dania_wydane[5]++;
         }
 
         sleep(1);
@@ -290,19 +341,19 @@ void obsluga()
     int tasma_dania_niesprzedane[6] = {0};
     for (int i = 0; i < MAX_TASMA; i++)
     {
-        if (tasma[i] != 0)
+        if (tasma[i].cena != 0)
         {
-            if (tasma[i] == 10)
+            if (tasma[i].cena == 10)
                 tasma_dania_niesprzedane[0]++;
-            else if (tasma[i] == 15)
+            else if (tasma[i].cena == 15)
                 tasma_dania_niesprzedane[1]++;
-            else if (tasma[i] == 20)
+            else if (tasma[i].cena == 20)
                 tasma_dania_niesprzedane[2]++;
-            else if (tasma[i] == 40)
+            else if (tasma[i].cena == 40)
                 tasma_dania_niesprzedane[3]++;
-            else if (tasma[i] == 50)
+            else if (tasma[i].cena == 50)
                 tasma_dania_niesprzedane[4]++;
-            else if (tasma[i] == 60)
+            else if (tasma[i].cena == 60)
                 tasma_dania_niesprzedane[5]++;
         }
     }
@@ -433,11 +484,11 @@ void generator_stolikow(struct Stolik *stoliki)
 }
 
 // ====== TAŚMA ======
-void dodaj_danie(int *tasma, int cena)
+void dodaj_danie(struct Talerzyk *tasma, int cena)
 {
     do
     {
-        int ostatni = tasma[MAX_STOLIKI - 1];
+        struct Talerzyk ostatni = tasma[MAX_STOLIKI - 1];
 
         for (int i = MAX_STOLIKI - 1; i > 0; i--)
         {
@@ -445,8 +496,17 @@ void dodaj_danie(int *tasma, int cena)
         }
 
         tasma[0] = ostatni; // WRACA NA POCZĄTEK
-    } while (tasma[0] != 0);
-    tasma[0] = cena;
+    } while (tasma[0].cena != 0);
+
+    tasma[0].cena = cena;
+    if (cena == p40 || cena == p50 || cena == p60)
+    {
+        // danie specjalne - przypisz stolik
+        tasma[0].stolik_specjalny =
+            printf("Danie specjalne za %d zł dodane na taśmę dla stolika %d.\n", cena, tasma[0].stolik_specjalny);
+    }
+    else
+        tasma[0].stolik_specjalny = 0; // domyślnie normalne danie
     printf("Danie za %d zł dodane na taśmę.\n", cena);
 }
 
@@ -456,7 +516,7 @@ void stworz_ipc(void)
     srand(time(NULL));
     int bufor = sizeof(struct Kolejka) +              // kolejka
                 sizeof(struct Stolik) * MAX_STOLIKI + // stoliki
-                sizeof(int) * MAX_TASMA +             // taśma
+                sizeof(struct Talerzyk) * MAX_TASMA + // taśma
                 sizeof(int) * 6 * 2 +                 // kuchnia i kasa - liczba dań
                 sizeof(int) * 3 +                     // sygnał kierownika i stan restauracji, i aktywni klienci
                 sizeof(int) * 6;                      // pobrane dania
@@ -467,7 +527,7 @@ void stworz_ipc(void)
 
     kolejka = pamiec_wspoldzielona;
     stoliki = (void *)(kolejka + 1);
-    tasma = (int *)(stoliki + MAX_STOLIKI);
+    tasma = (struct Talerzyk *)(stoliki + MAX_STOLIKI);
     kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);
     kasa_dania_sprzedane = kuchnia_dania_wydane + 6;
     sygnal_kierownika = kasa_dania_sprzedane + 6;

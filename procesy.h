@@ -13,10 +13,10 @@
 #include <sys/wait.h>
 
 // ====== STAŁE ======
-#define X1 20                                         // liczba stolików o pojemności 1
-#define X2 22                                         // liczba stolików o pojemności 2
-#define X3 53                                         // liczba stolików o pojemności 3
-#define X4 32                                         // liczba stolików o pojemności 4
+#define X1 5                                          // liczba stolików o pojemności 1
+#define X2 5                                          // liczba stolików o pojemności 2
+#define X3 5                                          // liczba stolików o pojemności 3
+#define X4 5                                          // liczba stolików o pojemności 4
 #define p10 10                                        // ceny dań 1
 #define p15 15                                        // ceny dań 2
 #define p20 20                                        // ceny dań 3
@@ -26,7 +26,7 @@
 #define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4) // maksymalna liczba osób przy stolikach
 #define MAX_STOLIKI (X1 + X2 + X3 + X4)               // maksymalna liczba stolików
 #define MAX_KOLEJKA 500                               // maksymalna liczba grup w kolejce
-#define MAX_TASMA 500                                 // maksymalna długość taśmy
+#define MAX_TASMA 100                                 // maksymalna długość taśmy
 #define TP 10                                         // godzina otwarcia restauracji
 #define TK 22                                         // godzina zamknięcia restauracji
 #define CZAS_PRACY (TK - TP) * 5                      // czas otwarcia restauracji w sekundach
@@ -42,7 +42,7 @@ extern int *restauracja_otwarta;                               // wskaźnik na s
 extern int *aktywni_klienci;                                   // wskaźnik na liczbę aktywnych klientów
 extern int *kuchnia_dania_wydane;                              // liczba wydanych dań przez kuchnię
 extern int *kasa_dania_sprzedane;                              // liczba sprzedanych dań przez kasę
-extern int *tasma;                                             // tablica reprezentująca taśmę
+extern struct Talerzyk *tasma;                                 // tablica reprezentująca taśmę
 static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
 static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
 extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
@@ -63,6 +63,7 @@ struct Grupa
     int stolik_przydzielony; // indeks stolika w tablicy stolików, -1 jeśli brak
     time_t wejscie;
     int pobrane_dania[6]; // liczba pobranych dań
+    int danie_specjalne;  // jeśli zamówiono danie specjalne to jest cena dania, 0 jeśli nie
 };
 
 struct Kolejka
@@ -76,6 +77,13 @@ struct Stolik
     int numer_stolika;
     int pojemnosc;
     pid_t proces_id;
+    struct Grupa grupa; // informacje o grupie przy stoliku
+};
+
+struct Talerzyk
+{
+    int cena;
+    int stolik_specjalny; // 0 = normalne danie, >0 = numer stolika dla zamówienia specjalnego
 };
 
 // ====== FUNCTION DECLARATIONS ======
@@ -134,7 +142,7 @@ void generator_stolikow(struct Stolik *stoliki);
  * @param tasma - conveyor belt array
  * @param cena - price of the dish
  */
-void dodaj_danie(int *tasma, int cena);
+void dodaj_danie(struct Talerzyk *tasma, int cena);
 
 /**
  * Assigns a table to a group
