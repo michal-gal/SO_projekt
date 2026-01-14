@@ -27,6 +27,7 @@
 #define MAX_STOLIKI (X1 + X2 + X3 + X4)               // maksymalna liczba stolików
 #define MAX_KOLEJKA 500                               // maksymalna liczba grup w kolejce
 #define MAX_TASMA 100                                 // maksymalna długość taśmy
+#define MAX_GRUP_NA_STOLIKU 4                         // maksymalna liczba grup na jednym stoliku
 #define TP 10                                         // godzina otwarcia restauracji
 #define TK 22                                         // godzina zamknięcia restauracji
 #define CZAS_PRACY (TK - TP) * 5                      // czas otwarcia restauracji w sekundach
@@ -77,7 +78,9 @@ struct Stolik
 {
     int numer_stolika;
     int pojemnosc;
-    struct Grupa grupa; // informacje o grupie przy stoliku
+    struct Grupa grupy[MAX_GRUP_NA_STOLIKU]; // tablica grup przy stoliku
+    int liczba_grup;                         // liczba grup przy stoliku
+    int zajete_miejsca;                      // liczba osób przy stoliku
 };
 
 struct Talerzyk

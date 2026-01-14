@@ -1,4 +1,5 @@
 #include "procesy.h"
+#include <errno.h>
 
 // ====== ZMIENNE GLOBALNE (DEFINICJE) ======
 int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
@@ -35,10 +36,17 @@ void klient()
         sem_op(SEM_STOLIKI, -1);
         for (int i = 0; i < MAX_STOLIKI; i++)
         {
-            if (stoliki[i].grupa.proces_id == 0 && stoliki[i].pojemnosc >= g.osoby)
+            // Szukaj stolika gdzie mieści się grupa i jest miejsce
+            if (stoliki[i].zajete_miejsca + g.osoby <= stoliki[i].pojemnosc &&
+                stoliki[i].liczba_grup < MAX_GRUP_NA_STOLIKU)
             {
-                stoliki[i].grupa = g; // zapisz pełną strukturę grupy
-                printf("Grupa VIP %d usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d\n", g.proces_id, g.osoby, g.dorosli, g.dzieci, stoliki[i].numer_stolika);
+                // Dodaj grupę do stolika
+                stoliki[i].grupy[stoliki[i].liczba_grup] = g;
+                stoliki[i].zajete_miejsca += g.osoby;
+                stoliki[i].liczba_grup++;
+                printf("Grupa VIP %d usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d (miejsc zajete: %d/%d)\n",
+                       g.proces_id, g.osoby, g.dorosli, g.dzieci, stoliki[i].numer_stolika,
+                       stoliki[i].zajete_miejsca, stoliki[i].pojemnosc);
                 g.stolik_przydzielony = i;
                 break;
             }
@@ -57,12 +65,18 @@ void klient()
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].grupa.proces_id == moj_proces_id)
+                // Szukaj grupy (procesu) w tablicy grup stolika
+                for (int j = 0; j < stoliki[i].liczba_grup; j++)
                 {
-                    g.stolik_przydzielony = i;
-                    printf("Grupa %d znalazła swój stolik: %d\n", g.proces_id, stoliki[i].numer_stolika);
-                    break;
+                    if (stoliki[i].grupy[j].proces_id == moj_proces_id)
+                    {
+                        g.stolik_przydzielony = i;
+                        printf("Grupa %d znalaza\u0142a swój stolik: %d\n", g.proces_id, stoliki[i].numer_stolika);
+                        break;
+                    }
                 }
+                if (g.stolik_przydzielony != -1)
+                    break;
             }
             sem_op(SEM_STOLIKI, 1);
             sleep(1);
@@ -105,7 +119,15 @@ void klient()
             dania_do_pobrania++; // dodaj oczekiwane specjalne danie, żeby grupa na nie poczekała
             // Zapisz zamówienie w stoliku, żeby obsługa wiedziała
             sem_op(SEM_STOLIKI, -1);
-            stoliki[g.stolik_przydzielony].grupa.danie_specjalne = c;
+            // Znajdź grupę w tablicy grupy[] i zaktualizuj jej danie_specjalne
+            for (int j = 0; j < stoliki[g.stolik_przydzielony].liczba_grup; j++)
+            {
+                if (stoliki[g.stolik_przydzielony].grupy[j].proces_id == g.proces_id)
+                {
+                    stoliki[g.stolik_przydzielony].grupy[j].danie_specjalne = c;
+                    break;
+                }
+            }
             sem_op(SEM_STOLIKI, 1);
             printf("Grupa %d zamawia danie specjalne za: %d zł. \n", g.proces_id, g.danie_specjalne);
             czas_start_dania = time(NULL); // reset timera po zamówieniu
@@ -165,7 +187,23 @@ void klient()
     // === WYJŚCIE ===
     sem_op(SEM_STOLIKI, -1);
     printf("Grupa %d przy stoliku %d opuszcza restaurację.\n", g.proces_id, stoliki[g.stolik_przydzielony].numer_stolika);
-    memset(&stoliki[g.stolik_przydzielony].grupa, 0, sizeof(struct Grupa));
+
+    // Znajdź i usuń grupę ze stolika
+    for (int j = 0; j < stoliki[g.stolik_przydzielony].liczba_grup; j++)
+    {
+        if (stoliki[g.stolik_przydzielony].grupy[j].proces_id == g.proces_id)
+        {
+            // Przesuń grupy w tablicy
+            for (int k = j; k < stoliki[g.stolik_przydzielony].liczba_grup - 1; k++)
+            {
+                stoliki[g.stolik_przydzielony].grupy[k] = stoliki[g.stolik_przydzielony].grupy[k + 1];
+            }
+            memset(&stoliki[g.stolik_przydzielony].grupy[stoliki[g.stolik_przydzielony].liczba_grup - 1], 0, sizeof(struct Grupa));
+            stoliki[g.stolik_przydzielony].liczba_grup--;
+            stoliki[g.stolik_przydzielony].zajete_miejsca -= g.osoby;
+            break;
+        }
+    }
     sem_op(SEM_STOLIKI, 1);
 
     sem_op(SEM_KOLEJKA, -1);
@@ -238,22 +276,38 @@ void obsluga()
             *restauracja_otwarta = 0;
 
             // Zamknięcie wszystkich procesów klientów przy stolikach
+            int killed_przy_stolikach = 0;
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].grupa.proces_id != 0)
+                // Iteruj w wstecznym kierunku aby nie pomijać grup przy zmniejszaniu liczba_grup
+                while (stoliki[i].liczba_grup > 0)
                 {
-                    pid_t pid = stoliki[i].grupa.proces_id;
-                    printf("Zamykanie procesu klienta %d przy stoliku %d\n", pid, i);
-                    kill(pid, SIGTERM);
-                    memset(&stoliki[i].grupa, 0, sizeof(struct Grupa));
-                    sem_op(SEM_KOLEJKA, -1);
-                    if (*aktywni_klienci > 0)
-                        (*aktywni_klienci)--;
-                    sem_op(SEM_KOLEJKA, 1);
+                    int j = stoliki[i].liczba_grup - 1;
+                    if (stoliki[i].grupy[j].proces_id != 0)
+                    {
+                        pid_t pid = stoliki[i].grupy[j].proces_id;
+                        printf("Zamykanie procesu klienta %d przy stoliku %d\n", pid, i);
+                        kill(pid, SIGTERM);
+                        killed_przy_stolikach++;
+                        stoliki[i].zajete_miejsca -= stoliki[i].grupy[j].osoby;
+                    }
+                    memset(&stoliki[i].grupy[j], 0, sizeof(struct Grupa));
+                    stoliki[i].liczba_grup--;
                 }
+                stoliki[i].zajete_miejsca = 0;
             }
             sem_op(SEM_STOLIKI, 1);
+
+            if (killed_przy_stolikach > 0)
+            {
+                sem_op(SEM_KOLEJKA, -1);
+                if (*aktywni_klienci >= killed_przy_stolikach)
+                    *aktywni_klienci -= killed_przy_stolikach;
+                else
+                    *aktywni_klienci = 0;
+                sem_op(SEM_KOLEJKA, 1);
+            }
 
             // Zamknięcie wszystkich procesów w kolejce
             sem_op(SEM_KOLEJKA, -1);
@@ -283,10 +337,16 @@ void obsluga()
             sem_op(SEM_STOLIKI, -1);
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].grupa.proces_id == 0 && stoliki[i].pojemnosc == g.osoby) // przydzielamy stolik
+                // Sprawdź czy grupa mieści się i czy stolik nie jest pełny
+                if (stoliki[i].zajete_miejsca + g.osoby <= stoliki[i].pojemnosc &&
+                    stoliki[i].liczba_grup < MAX_GRUP_NA_STOLIKU)
                 {
-                    stoliki[i].grupa = g; // zapisz pełną strukturę grupy
-                    printf("Grupa usadzona: PID %d przy stoliku: %d\n", g.proces_id, stoliki[i].numer_stolika);
+                    // Dodaj grupę do tablicy grup
+                    stoliki[i].grupy[stoliki[i].liczba_grup] = g;
+                    stoliki[i].zajete_miejsca += g.osoby;
+                    stoliki[i].liczba_grup++;
+                    printf("Grupa usadzona: PID %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
+                           g.proces_id, stoliki[i].numer_stolika, stoliki[i].zajete_miejsca, stoliki[i].pojemnosc);
                     break;
                 }
             }
@@ -305,26 +365,30 @@ void obsluga()
             // obsługa dań specjalnych
             for (int i = 0; i < MAX_STOLIKI; i++)
             {
-                if (stoliki[i].grupa.danie_specjalne != 0)
+                // Iteruj przez wszystkie grupy przy stoliku
+                for (int j = 0; j < stoliki[i].liczba_grup; j++)
                 {
-                    int cena_specjalna = stoliki[i].grupa.danie_specjalne;
-                    int numer_stolika = stoliki[i].numer_stolika;
-                    sem_op(SEM_TASMA, -1);
-                    dodaj_danie(tasma, cena_specjalna);
-                    tasma[0].stolik_specjalny = numer_stolika; // oznacz dla którego stolika jest danie
-                    sem_op(SEM_TASMA, 1);
-                    stoliki[i].grupa.danie_specjalne = 0; // zresetuj po dodaniu
+                    if (stoliki[i].grupy[j].danie_specjalne != 0)
+                    {
+                        int cena_specjalna = stoliki[i].grupy[j].danie_specjalne;
+                        int numer_stolika = stoliki[i].numer_stolika;
+                        sem_op(SEM_TASMA, -1);
+                        dodaj_danie(tasma, cena_specjalna);
+                        tasma[0].stolik_specjalny = numer_stolika; // oznacz dla którego stolika jest danie
+                        sem_op(SEM_TASMA, 1);
+                        stoliki[i].grupy[j].danie_specjalne = 0; // zresetuj po dodaniu
 
-                    // Zwiększ licznik wydanych dań specjalnych
-                    if (cena_specjalna == 40)
-                        kuchnia_dania_wydane[3]++;
-                    else if (cena_specjalna == 50)
-                        kuchnia_dania_wydane[4]++;
-                    else if (cena_specjalna == 60)
-                        kuchnia_dania_wydane[5]++;
+                        // Zwiększ licznik wydanych dań specjalnych
+                        if (cena_specjalna == 40)
+                            kuchnia_dania_wydane[3]++;
+                        else if (cena_specjalna == 50)
+                            kuchnia_dania_wydane[4]++;
+                        else if (cena_specjalna == 60)
+                            kuchnia_dania_wydane[5]++;
 
-                    printf("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
-                           cena_specjalna, numer_stolika);
+                        printf("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
+                               cena_specjalna, numer_stolika);
+                    }
                 }
             }
 
@@ -472,7 +536,21 @@ void kierownik()
 void sem_op(int sem, int val) // wykonanie operacji na semaforze, val = +1 (zwolnienie), -1 (zablokowanie)
 {
     struct sembuf sb = {sem, val, 0}; // inicjalizacja struktury operacji semaforowej,
-    semop(sem_id, &sb, 1);            // wykonanie operacji na semaforze,
+    for (;;)
+    {
+        if (semop(sem_id, &sb, 1) == 0) // wykonanie operacji na semaforze
+            return;
+
+        if (errno == EINTR)
+            continue;
+
+        // IPC usunięte/nieprawidłowe (np. podczas sprzątania) — zakończ proces bez hałasu
+        if (errno == EIDRM || errno == EINVAL)
+            exit(0);
+
+        perror("semop");
+        exit(1);
+    }
 }
 
 // ====== KOLEJKA ======
@@ -524,7 +602,9 @@ void generator_stolikow(struct Stolik *stoliki)
             idx = suma_poprzednich + j;
             stoliki[idx].numer_stolika = idx + 1;
             stoliki[idx].pojemnosc = i + 1;
-            memset(&stoliki[idx].grupa, 0, sizeof(struct Grupa));
+            stoliki[idx].liczba_grup = 0;
+            stoliki[idx].zajete_miejsca = 0;
+            memset(stoliki[idx].grupy, 0, sizeof(stoliki[idx].grupy));
 
             printf("Stolik %d o pojemności %d utworzony.\n",
                    stoliki[idx].numer_stolika,
