@@ -53,7 +53,6 @@ extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 #define SEM_KOLEJKA 0
 #define SEM_STOLIKI 1
 #define SEM_TASMA 2
-#define SEM_PRINT 3
 
 struct Grupa
 {
@@ -146,12 +145,6 @@ void generator_stolikow(struct Stolik *stoliki);
  * @param cena - price of the dish
  */
 void dodaj_danie(struct Talerzyk *tasma, int cena);
-
-/**
- * Assigns a table to a group
- * @param g - pointer to the group structure
- */
-void przydziel_stolik(struct Grupa *g);
 
 /**
  * Creates IPC resources (shared memory and semaphores)
