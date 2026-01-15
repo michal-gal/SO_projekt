@@ -18,7 +18,7 @@ pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 void klient()
 {
     // === INICJALIZACJA GRUPY ===
-    struct Grupa g;
+    struct Grupa g; 
     g.proces_id = getpid();
     g.osoby = rand() % 4 + 1;
     g.dorosli = rand() % g.osoby + 1; // co najmniej 1 dorosły
