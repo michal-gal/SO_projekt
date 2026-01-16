@@ -1,5 +1,16 @@
 #include "restauracja.h"
 
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
 typedef void (*child_fn)(void);
 
 static pid_t spawn_child(child_fn fn, const char *name)

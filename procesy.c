@@ -1,5 +1,14 @@
 #include "procesy.h"
 #include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 // ====== ZMIENNE GLOBALNE (DEFINICJE) ======
 int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
@@ -13,6 +22,9 @@ int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
 struct Talerzyk *tasma;    // tablica reprezentująca taśmę
 int *kolej_podsumowania;   // czyja kolej na podsumowanie
 pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
+
+const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};
+const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60};
 
 static int price_to_index(int cena)
 {
@@ -408,6 +420,99 @@ static void obsluga_serve_dishes(double wydajnosc)
     }
 }
 
+static void wait_until_no_active_clients(void)
+{
+    while (*aktywni_klienci > 0)
+        sleep(1);
+}
+
+static void wait_until_closed_and_no_active_clients(void)
+{
+    while (*restauracja_otwarta || *aktywni_klienci > 0)
+        sleep(1);
+}
+
+static void print_kitchen_summary(void)
+{
+    printf("\n=== PODSUMOWANIE KUCHNI ===\n");
+    int kuchnia_suma = 0;
+    for (int i = 0; i < 6; i++)
+    {
+        printf("Kuchnia - liczba wydanych dań za %d zł: %d\n", CENY_DAN[i], kuchnia_dania_wydane[i]);
+        kuchnia_suma += kuchnia_dania_wydane[i] * CENY_DAN[i];
+    }
+    printf("\nSuma: %d zł\n", kuchnia_suma);
+}
+
+static void kierownik_update_signal(void)
+{
+    *sygnal_kierownika = rand() % 50; // losowa zmiana sygnału kierownika
+    printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
+}
+
+static int klient_wait_for_dishes(struct Grupa *g)
+{
+    // === CZEKANIE NA DANIA ===
+    int dania_pobrane = 0;                  // licznik pobranych dań
+    int dania_do_pobrania = rand() % 8 + 3; // losowa liczba dań do pobrania (3-10)
+    time_t czas_start_dania = time(NULL);
+    int timeout_dania = 5; // 5 sekund na pobranie dań
+
+    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta) // wyjdź jeśli restauracja zamknięta lub pobrano wszystkie dania
+    {
+        if (time(NULL) - czas_start_dania > timeout_dania * 4) // maksymalny czas oczekiwania na dania (2x timeout)
+        {
+            printf("Grupa %d timeout czekania na dania - kończy się\n", g->proces_id);
+            break;
+        }
+
+        order_special_if_needed(g, &dania_do_pobrania, &czas_start_dania, timeout_dania);
+
+        TakeDishResult take_res = try_take_dish(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
+        if (take_res == TAKE_SKIPPED_OTHER_TABLE)
+        {
+            sleep(1);
+            continue;
+        }
+
+        sleep(1); // czekaj na kolejne danie
+    }
+
+    return dania_pobrane;
+}
+
+static void generator_reap_children_nonblocking(void)
+{
+    int status;
+    while (waitpid(-1, &status, WNOHANG) > 0)
+        active_clients_dec_if_positive();
+}
+
+static void generator_reap_children_blocking(void)
+{
+    int status;
+    while (waitpid(-1, &status, 0) > 0)
+        active_clients_dec_if_positive();
+}
+
+static void generator_spawn_one_group(void)
+{
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        klient();
+        _exit(0);
+    }
+    if (pid > 0)
+    {
+        // Zliczaj tylko w procesie rodzica
+        active_clients_inc();
+        return;
+    }
+
+    perror("fork");
+}
+
 // ====== PROCES KLIENT ======
 void klient()
 {
@@ -427,31 +532,7 @@ void klient()
             exit(0);
     }
 
-    // === CZEKANIE NA DANIA ===
-    int dania_pobrane = 0;                  // licznik pobranych dań
-    int dania_do_pobrania = rand() % 8 + 3; // losowa liczba dań do pobrania (3-10)
-    time_t czas_start_dania = time(NULL);
-    int timeout_dania = 5; // 5 sekund na pobranie dań
-
-    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta) // wyjdź jeśli restauracja zamknięta lub pobrano wszystkie dania
-    {
-        if (time(NULL) - czas_start_dania > timeout_dania * 4) // maksymalny czas oczekiwania na dania (2x timeout)
-        {
-            printf("Grupa %d timeout czekania na dania - kończy się\n", g.proces_id);
-            break;
-        }
-
-        order_special_if_needed(&g, &dania_do_pobrania, &czas_start_dania, timeout_dania);
-
-        TakeDishResult take_res = try_take_dish(&g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
-        if (take_res == TAKE_SKIPPED_OTHER_TABLE)
-        {
-            sleep(1);
-            continue;
-        }
-
-        sleep(1); // czekaj na kolejne danie
-    }
+    int dania_pobrane = klient_wait_for_dishes(&g);
 
     // === PŁATNOŚĆ ===
     pay_for_dishes(&g, dania_pobrane);
@@ -469,40 +550,15 @@ void generator_klientow()
     while (*restauracja_otwarta)
     {
         // Nie blokuj generatora, ale sprzątaj zakończone dzieci, żeby nie powstawały zombie.
-        {
-            int status;
-            pid_t reaped;
-            while ((reaped = waitpid(-1, &status, WNOHANG)) > 0)
-                active_clients_dec_if_positive();
-        }
+        generator_reap_children_nonblocking();
 
-        pid_t pid = fork();
-
-        if (pid == 0)
-        {
-            klient(); // ← JEDNA grupa
-            exit(0);
-        }
-        else if (pid > 0)
-        {
-            // Zliczaj tylko w procesie rodzica
-            active_clients_inc();
-        }
-        else
-        {
-            perror("fork");
-        }
+        generator_spawn_one_group();
         sleep(rand() % 3 + 1); // losowy czas między generowaniem grup (1-3 sekundy)
     }
 
     // Po zamknięciu restauracji: poczekaj aż wszystkie dzieci (klienci) się zakończą
     // i dopiero wtedy oddaj kolejkę do podsumowań.
-    {
-        int status;
-        pid_t reaped;
-        while ((reaped = waitpid(-1, &status, 0)) > 0)
-            active_clients_dec_if_positive();
-    }
+    generator_reap_children_blocking();
 
     // Czekaj na swoją kolej (generator = 0)
     wait_for_turn(0);
@@ -533,10 +589,7 @@ void obsluga()
         sleep(1);
     }
 
-    while (*aktywni_klienci > 0)
-    {
-        sleep(1);
-    }
+    wait_until_no_active_clients();
 
     // Czekaj na swoją kolej (obsługa = 1)
     wait_for_turn(1);
@@ -586,24 +639,13 @@ void obsluga()
 // ====== KUCHARZ ======
 void kucharz()
 {
-    while (*restauracja_otwarta || *aktywni_klienci > 0)
-    {
-        sleep(1);
-    }
+    wait_until_closed_and_no_active_clients();
 
     // Czekaj na swoją kolej (kucharz = 2)
     wait_for_turn(2);
 
     // PODSUMOWANIE KUCHNI
-    printf("\n=== PODSUMOWANIE KUCHNI ===\n");
-    int kuchnia_suma = 0;
-    for (int i = 0; i < 6; i++)
-    {
-        printf("Kuchnia - liczba wydanych dań za %d zł: %d\n", CENY_DAN[i], kuchnia_dania_wydane[i]);
-
-        kuchnia_suma += kuchnia_dania_wydane[i] * CENY_DAN[i];
-    }
-    printf("\nSuma: %d zł\n", kuchnia_suma);
+    print_kitchen_summary();
 
     printf("Kucharz kończy pracę.\n");
     printf("======================\n");
@@ -620,15 +662,11 @@ void kierownik()
 {
     while (*restauracja_otwarta)
     {
-        *sygnal_kierownika = rand() % 50; // losowa zmiana sygnału kierownika
-        printf("Kierownik zmienia sygnał na: %d\n", *sygnal_kierownika);
+        kierownik_update_signal();
         sleep(1);
     }
 
-    while (*aktywni_klienci > 0)
-    {
-        sleep(1);
-    }
+    wait_until_no_active_clients();
 
     // Czekaj na swoją kolej (kierownik = 3)
     wait_for_turn(3);

@@ -1,16 +1,8 @@
 #ifndef PROCESY_H
 #define PROCESY_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <time.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <sys/sem.h>
-#include <signal.h>
-#include <string.h>
-#include <sys/wait.h>
+#include <sys/types.h> // pid_t
+#include <time.h>      // time_t
 
 // ====== STAŁE ======
 #define X1 5                                          // liczba stolików o pojemności 1
@@ -35,18 +27,18 @@
 #define LADA (MAX_TASMA - MAX_OSOBY - REZERWA_TASMA)
 
 // ====== ZMIENNE GLOBALNE ======
-extern int shm_id, sem_id;                                     // ID pamięci współdzielonej i semaforów
-extern struct Kolejka *kolejka;                                // wskaźnik na kolejkę
-extern struct Stolik *stoliki;                                 // wskaźnik na tablicę stolików
-extern int *sygnal_kierownika;                                 // wskaźnik na sygnał kierownika
-extern int *restauracja_otwarta;                               // wskaźnik na stan restauracji
-extern int *aktywni_klienci;                                   // wskaźnik na liczbę aktywnych klientów
-extern int *kuchnia_dania_wydane;                              // liczba wydanych dań przez kuchnię
-extern int *kasa_dania_sprzedane;                              // liczba sprzedanych dań przez kasę
-extern struct Talerzyk *tasma;                                 // tablica reprezentująca taśmę
-extern int *kolej_podsumowania;                                // czyja kolej na podsumowanie (0=generator, 1=obsługa, 2=kucharz, 3=kierownik)
-static const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
-static const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań;
+extern int shm_id, sem_id;          // ID pamięci współdzielonej i semaforów
+extern struct Kolejka *kolejka;     // wskaźnik na kolejkę
+extern struct Stolik *stoliki;      // wskaźnik na tablicę stolików
+extern int *sygnal_kierownika;      // wskaźnik na sygnał kierownika
+extern int *restauracja_otwarta;    // wskaźnik na stan restauracji
+extern int *aktywni_klienci;        // wskaźnik na liczbę aktywnych klientów
+extern int *kuchnia_dania_wydane;   // liczba wydanych dań przez kuchnię
+extern int *kasa_dania_sprzedane;   // liczba sprzedanych dań przez kasę
+extern struct Talerzyk *tasma;      // tablica reprezentująca taśmę
+extern int *kolej_podsumowania;     // czyja kolej na podsumowanie (0=generator, 1=obsługa, 2=kucharz, 3=kierownik)
+extern const int ILOSC_STOLIKOW[4]; // liczba stolików o pojemności 1,2,3,4
+extern const int CENY_DAN[6];       // ceny dań
 extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 
 // ====== SEMAFORY IDS ======
