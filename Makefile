@@ -3,15 +3,15 @@ CFLAGS = -Wall -g
 LDFLAGS = -pthread
 TARGET = restauracja
 PROCS = klient obsluga kucharz kierownik
-HEADERS = procesy.h restauracja.h
+HEADERS = common.h restauracja.h
 
 COMMON_OBJS = common.o
 
 OBJECTS_RESTAURACJA = restauracja.o $(COMMON_OBJS)
-OBJECTS_KLIENT = klient_main.o klient.o $(COMMON_OBJS)
-OBJECTS_OBSLUGA = obsluga_main.o obsluga.o $(COMMON_OBJS)
-OBJECTS_KUCHARZ = kucharz_main.o kucharz.o $(COMMON_OBJS)
-OBJECTS_KIEROWNIK = kierownik_main.o kierownik.o $(COMMON_OBJS)
+OBJECTS_KLIENT = klient.o $(COMMON_OBJS)
+OBJECTS_OBSLUGA = obsluga.o $(COMMON_OBJS)
+OBJECTS_KUCHARZ = kucharz.o $(COMMON_OBJS)
+OBJECTS_KIEROWNIK = kierownik.o $(COMMON_OBJS)
 
 all: $(TARGET) $(PROCS)
 
@@ -48,19 +48,6 @@ kucharz.o: kucharz.c $(HEADERS)
 
 kierownik.o: kierownik.c $(HEADERS)
 	$(CC) $(CFLAGS) -c kierownik.c
-
-
-klient_main.o: klient_main.c $(HEADERS)
-	$(CC) $(CFLAGS) -c klient_main.c
-
-obsluga_main.o: obsluga_main.c $(HEADERS)
-	$(CC) $(CFLAGS) -c obsluga_main.c
-
-kucharz_main.o: kucharz_main.c $(HEADERS)
-	$(CC) $(CFLAGS) -c kucharz_main.c
-
-kierownik_main.o: kierownik_main.c $(HEADERS)
-	$(CC) $(CFLAGS) -c kierownik_main.c
 
 
 clean:

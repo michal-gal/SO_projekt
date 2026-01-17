@@ -28,18 +28,13 @@ static void active_clients_dec_if_positive(void)
     sem_op(SEM_AKTYWNI_KLIENCI, 1);
 }
 
-static void generator_reap_children_nonblocking(void)
+static int active_clients_get(void)
 {
-    int status;
-    while (waitpid(-1, &status, WNOHANG) > 0)
-        active_clients_dec_if_positive();
-}
-
-static void generator_reap_children_blocking(void)
-{
-    int status;
-    while (waitpid(-1, &status, 0) > 0)
-        active_clients_dec_if_positive();
+    int value;
+    sem_op(SEM_AKTYWNI_KLIENCI, -1);
+    value = *aktywni_klienci;
+    sem_op(SEM_AKTYWNI_KLIENCI, 1);
+    return value;
 }
 
 static void generator_spawn_one_group(void)
@@ -58,29 +53,6 @@ static void generator_spawn_one_group(void)
     }
 
     perror("fork");
-}
-
-void generator_klientow(void)
-{
-    srand(getpid());
-
-    while (*restauracja_otwarta)
-    {
-        generator_reap_children_nonblocking();
-        generator_spawn_one_group();
-        sleep(rand() % 3 + 1);
-    }
-
-    generator_reap_children_blocking();
-
-    wait_for_turn(0);
-
-    printf("Generator klientów kończy pracę.\n");
-    fflush(stdout);
-
-    *kolej_podsumowania = 1;
-
-    exit(0);
 }
 
 // ====== MAIN ======
@@ -117,6 +89,8 @@ int main(void)
     }
 
     *restauracja_otwarta = 1;
+    // Brak osobnego procesu generatora => pomijamy "turn 0".
+    *kolej_podsumowania = 1;
 
     pid_obsluga = fork();
     if (pid_obsluga == 0)
@@ -159,22 +133,41 @@ int main(void)
     }
     *pid_kierownik_shm = pid_kierownik;
 
-    pid_generator = fork();
-    if (pid_generator == 0)
-    {
-        generator_klientow();
-        _exit(0);
-    }
-    if (pid_generator < 0)
-    {
-        perror("fork (generator)");
-        exit(1);
-    }
-
-    // Czekaj maksymalnie CZAS_PRACY lub do sygnału zamknięcia (np. sygnał 3 od kierownika)
+    // Generator klientów działa w procesie restauracji (bez osobnego procesu generatora).
+    srand(getpid());
     time_t start_czekania = time(NULL);
+    time_t next_spawn = start_czekania;
+    int status;
+
+    int obsluga_done = 0;
+    int kucharz_done = 0;
+    int kierownik_done = 0;
+
     while (time(NULL) - start_czekania < CZAS_PRACY && *restauracja_otwarta)
     {
+        // Zbieraj zakończone dzieci (klienci + ewentualnie procesy główne).
+        for (;;)
+        {
+            pid_t p = waitpid(-1, &status, WNOHANG);
+            if (p <= 0)
+                break;
+            if (p == pid_obsluga)
+                obsluga_done = 1;
+            else if (p == pid_kucharz)
+                kucharz_done = 1;
+            else if (p == pid_kierownik)
+                kierownik_done = 1;
+            else
+                active_clients_dec_if_positive();
+        }
+
+        time_t now = time(NULL);
+        if (now >= next_spawn)
+        {
+            generator_spawn_one_group();
+            next_spawn = now + (rand() % 3 + 1);
+        }
+
         sleep(1);
     }
 
@@ -182,23 +175,47 @@ int main(void)
     printf("\n===Czas pracy restauracji minął!===\n");
     fflush(stdout);
 
-    const pid_t pids[] = {pid_obsluga, pid_kucharz, pid_kierownik, pid_generator};
-    const int n_pids = 4;
+    // Obsluga ma czekać na turn 1 po zamknięciu.
+    *kolej_podsumowania = 1;
+
+    const pid_t pids[] = {pid_obsluga, pid_kucharz, pid_kierownik};
+    const int n_pids = 3;
 
     // Czekanie na zakończenie wszystkich procesów potomnych z timeoutem
     time_t czas_start = time(NULL);
-    int status;
     int licznik_procesow = 0;
 
-    // Czekamy na 4 główne procesy (obsluga, kucharz, kierownik, generator)
+    // Czekamy na 3 główne procesy (obsluga, kucharz, kierownik)
+    licznik_procesow = obsluga_done + kucharz_done + kierownik_done;
     while (licznik_procesow < n_pids)
     {
         int proces = waitpid(-1, &status, WNOHANG);
 
         if (proces > 0)
         {
-            licznik_procesow++;
-            printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
+            if (proces == pid_obsluga && !obsluga_done)
+            {
+                obsluga_done = 1;
+                licznik_procesow++;
+                printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
+            }
+            else if (proces == pid_kucharz && !kucharz_done)
+            {
+                kucharz_done = 1;
+                licznik_procesow++;
+                printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
+            }
+            else if (proces == pid_kierownik && !kierownik_done)
+            {
+                kierownik_done = 1;
+                licznik_procesow++;
+                printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
+            }
+            else
+            {
+                // klient
+                active_clients_dec_if_positive();
+            }
         }
         else if (proces == 0)
         {
@@ -233,6 +250,35 @@ int main(void)
     }
 
     sleep(1);
+
+    // Daj klientom szansę dokończyć i zostać zebranym przez waitpid(), zanim usuniemy IPC.
+    // To jest ograniczone czasowo, żeby nie wisieć w nieskończoność przy błędnym liczniku.
+    {
+        time_t client_wait_start = time(NULL);
+        while (active_clients_get() > 0 && time(NULL) - client_wait_start < 5)
+        {
+            for (;;)
+            {
+                pid_t p = waitpid(-1, &status, WNOHANG);
+                if (p <= 0)
+                    break;
+                if (p == pid_obsluga)
+                    obsluga_done = 1;
+                else if (p == pid_kucharz)
+                    kucharz_done = 1;
+                else if (p == pid_kierownik)
+                    kierownik_done = 1;
+                else
+                    active_clients_dec_if_positive();
+            }
+
+            sleep(1);
+        }
+
+        int remaining = active_clients_get();
+        if (remaining > 0)
+            printf("Ostrzeżenie: kończę mimo aktywnych klientów: %d\n", remaining);
+    }
 
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);

@@ -1,7 +1,7 @@
 #ifndef RESTAURACJA_H
 #define RESTAURACJA_H
 
-#include "procesy.h"
+#include "common.h"
 
 // Header dla modułu programu głównego (restauracja.c).
 

@@ -1,11 +1,5 @@
-#ifndef PROCESY_H
-#define PROCESY_H
-
-// Feature-test macro for POSIX APIs like sigaction/SA_RESTART.
-// Must be defined before including any system headers.
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L
-#endif
+#ifndef COMMON_H
+#define COMMON_H
 
 #include <sys/types.h> // pid_t
 #include <time.h>      // time_t
@@ -40,15 +34,14 @@ extern int *aktywni_klienci;        // wskaźnik na liczbę aktywnych klientów
 extern int *kuchnia_dania_wydane;   // liczba wydanych dań przez kuchnię
 extern int *kasa_dania_sprzedane;   // liczba sprzedanych dań przez kasę
 extern struct Talerzyk *tasma;      // tablica reprezentująca taśmę
-extern int *kolej_podsumowania;     // czyja kolej na podsumowanie (0=generator, 1=obsługa, 2=kucharz, 3=kierownik)
+extern int *kolej_podsumowania;     // czyja kolej na podsumowanie (1=obsługa, 2=kucharz, 3=kierownik)
 extern const int ILOSC_STOLIKOW[4]; // liczba stolików o pojemności 1,2,3,4
 extern const int CENY_DAN[6];       // ceny dań
-extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
+extern pid_t pid_obsluga, pid_kucharz, pid_kierownik;
 // PID-y procesów w pamięci współdzielonej (potrzebne po exec(), np. do wysyłania sygnałów)
 extern pid_t *pid_obsluga_shm;
 extern pid_t *pid_kierownik_shm;
 
-// ====== SEMAFORY IDS ======
 #define SEM_AKTYWNI_KLIENCI 0 // mutex dla licznika aktywnych klientów
 #define SEM_STOLIKI 1
 #define SEM_TASMA 2
@@ -92,7 +85,6 @@ void sem_op(int sem, int val);
 
 /**
  * Adds a group to the queue
- * @param pid - process ID of group
  */
 void push(struct Grupa g);
 
@@ -103,29 +95,24 @@ void push(struct Grupa g);
 struct Grupa pop(void);
 
 /**
- * Client process - generates customer groups
+ * Client process
  */
 void klient(void);
 
 /**
- * Service process - seats groups and manages dishes
+ * Service process
  */
 void obsluga(void);
 
 /**
- * Cook process - prepares dishes
+ * Cook process
  */
 void kucharz(void);
 
 /**
- * Manager process - sends signals to adjust productivity
+ * Manager process
  */
 void kierownik(void);
-
-/**
- * Client generator process - spawns client processes
- */
-void generator_klientow(void);
 
 /**
  * Table generator - initializes tables
@@ -134,8 +121,6 @@ void generator_stolikow(struct Stolik *stoliki);
 
 /**
  * Adds a dish to the conveyor belt
- * @param tasma - conveyor belt array
- * @param cena - price of the dish
  */
 void dodaj_danie(struct Talerzyk *tasma, int cena);
 
@@ -146,7 +131,6 @@ void stworz_ipc(void);
 
 /**
  * Attaches to existing IPC resources after exec().
- * Expects shm_id and sem_id created by the parent process.
  */
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
 
@@ -161,4 +145,6 @@ void wait_for_turn(int turn);
 void wait_until_no_active_clients(void);
 void wait_until_closed_and_no_active_clients(void);
 
-#endif // PROCESY_H
+int env_int_or_die(const char *name);
+
+#endif // COMMON_H
