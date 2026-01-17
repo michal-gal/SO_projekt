@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,23 +13,29 @@
 #include <unistd.h>
 
 // ====== ZMIENNE GLOBALNE (DEFINICJE) ======
-int shm_id, sem_id;
-int msgq_id;
-struct Stolik *stoliki;
-int *restauracja_otwarta;
-int *kuchnia_dania_wydane;
-int *kasa_dania_sprzedane;
-struct Talerzyk *tasma;
-int *kolej_podsumowania;
-pid_t pid_obsluga, pid_kucharz, pid_kierownik;
+int shm_id, sem_id;                            // pamięć współdzielona i semafory
+int msgq_id;                                   // kolejka komunikatów
+struct Stolik *stoliki;                        // stoły
+int *restauracja_otwarta;                      // czy restauracja jest otwarta
+int *kuchnia_dania_wydane;                     // kuchnia - liczba wydanych dań
+int *kasa_dania_sprzedane;                     // kasa - liczba sprzedanych dań
+struct Talerzyk *tasma;                        // taśma, reprezentowana jako tablica
+int *kolej_podsumowania;                       // kolejka podsumowania
+pid_t pid_obsluga, pid_kucharz, pid_kierownik; // pid-y procesów
 
-pid_t *pid_obsluga_shm;
-pid_t *pid_kierownik_shm;
+pid_t *pid_obsluga_shm;   // wskaźnik na PID procesu obsługi w pamięci współdzielonej
+pid_t *pid_kierownik_shm; // wskaźnik na PID procesu kierownika w pamięci współdzielonej
 
-const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};
-const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60};
+const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
+const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań
 
-// ====== UTILS ======
+void zainicjuj_losowosc(void)
+{
+    log_init_from_env();
+    srand((unsigned)time(NULL) ^ (unsigned)getpid());
+}
+
+// ====== przeliczenia ======
 int cena_na_indeks(int cena)
 {
     switch (cena)
@@ -50,6 +57,7 @@ int cena_na_indeks(int cena)
     }
 }
 
+// ====== PARSOWANIE ======
 int parsuj_int_lub_zakoncz(const char *what, const char *s)
 {
     errno = 0;
@@ -57,13 +65,13 @@ int parsuj_int_lub_zakoncz(const char *what, const char *s)
     long v = strtol(s, &end, 10);
     if (errno != 0 || end == s || (end && *end != '\0'))
     {
-        fprintf(stderr, "Nieprawidłowa wartość %s=%s\n", what, s ? s : "(null)");
+        LOGE("Nieprawidłowa wartość %s=%s\n", what, s ? s : "(null)");
         exit(1);
     }
     return (int)v;
 }
 
-// ====== SYNC ======
+// ====== SYNCHRONIZACJA ======
 void czekaj_na_ture(int turn)
 {
     while (*kolej_podsumowania != turn)
@@ -75,7 +83,7 @@ void czekaj_na_ture(int turn)
     }
 }
 
-// ====== TABLES ======
+// ====== STOLIKI ======
 int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g)
 {
     for (int i = 0; i < MAX_STOLIKI; i++)
@@ -107,9 +115,9 @@ void generator_stolikow(struct Stolik *stoliki_local)
             stoliki_local[idx].zajete_miejsca = 0;
             memset(stoliki_local[idx].grupy, 0, sizeof(stoliki_local[idx].grupy));
 
-            printf("Stolik %d o pojemności %d utworzony.\n",
-                   stoliki_local[idx].numer_stolika,
-                   stoliki_local[idx].pojemnosc);
+            LOGI("Stolik %d o pojemności %d utworzony.\n",
+                 stoliki_local[idx].numer_stolika,
+                 stoliki_local[idx].pojemnosc);
         }
     }
 }
@@ -131,15 +139,10 @@ void dodaj_danie(struct Talerzyk *tasma_local, int cena)
 
     tasma_local[0].cena = cena;
     tasma_local[0].stolik_specjalny = 0;
-
-    if (cena == p40 || cena == p50 || cena == p60)
-        printf("Danie specjalne za %d zł dodane na taśmę.\n", cena);
-    else
-        printf("Danie za %d zł dodane na taśmę.\n", cena);
 }
 
-// ====== IPC ======
-void sem_operacja(int sem, int val)
+// ====== operacje IPC ======
+void sem_operacja(int sem, int val) // zrobienie operacji na semaforze
 {
     struct sembuf sb = {sem, val, SEM_UNDO};
     for (;;)
@@ -153,14 +156,12 @@ void sem_operacja(int sem, int val)
         if (errno == EIDRM || errno == EINVAL)
             exit(0);
 
-        perror("semop");
         exit(1);
     }
 }
 
 void stworz_ipc(void)
 {
-    srand(time(NULL));
     int bufor = sizeof(struct Stolik) * MAX_STOLIKI +
                 sizeof(struct Talerzyk) * MAX_TASMA +
                 sizeof(int) * (6 * 2 + 2) +
@@ -170,7 +171,7 @@ void stworz_ipc(void)
     void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);
     if (pamiec_wspoldzielona == (void *)-1)
     {
-        perror("shmat");
+        LOGE_ERRNO("shmat");
         exit(1);
     }
     memset(pamiec_wspoldzielona, 0, bufor);
@@ -192,7 +193,7 @@ void stworz_ipc(void)
     msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
     if (msgq_id < 0)
     {
-        perror("msgget");
+        LOGE_ERRNO("msgget");
         exit(1);
     }
 }
@@ -205,7 +206,7 @@ void dolacz_ipc(int shm_id_existing, int sem_id_existing)
     void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);
     if (pamiec_wspoldzielona == (void *)-1)
     {
-        perror("shmat");
+        LOGE_ERRNO("shmat");
         exit(1);
     }
 
@@ -220,7 +221,7 @@ void dolacz_ipc(int shm_id_existing, int sem_id_existing)
     pid_kierownik_shm = pid_obsluga_shm + 1;
 }
 
-// ====== QUEUE (System V message queue) ======
+// ====== kolejka ======
 
 typedef struct
 {
@@ -246,7 +247,6 @@ void kolejka_dodaj(struct Grupa g)
         if (errno == EIDRM || errno == EINVAL)
             exit(0);
 
-        perror("msgsnd");
         return;
     }
 }
@@ -269,7 +269,51 @@ struct Grupa kolejka_pobierz(void)
         if (errno == EIDRM || errno == EINVAL)
             exit(0);
 
-        perror("msgrcv");
         return g;
+    }
+}
+
+void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void)
+{
+    // Klienci usadzeni przy stolikach.
+    sem_operacja(SEM_STOLIKI, -1);
+    for (int i = 0; i < MAX_STOLIKI; i++)
+    {
+        for (int j = 0; j < stoliki[i].liczba_grup; j++)
+        {
+            pid_t pid = stoliki[i].grupy[j].proces_id;
+            if (pid > 0)
+            {
+                (void)kill(pid, SIGTERM);
+            }
+        }
+
+        memset(stoliki[i].grupy, 0, sizeof(stoliki[i].grupy));
+        stoliki[i].liczba_grup = 0;
+        stoliki[i].zajete_miejsca = 0;
+    }
+    sem_operacja(SEM_STOLIKI, 1);
+
+    // Klienci w kolejce wejściowej.
+    QueueMsg msg;
+    for (;;)
+    {
+        ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
+        if (r < 0)
+        {
+            if (errno == ENOMSG)
+                break;
+            if (errno == EINTR)
+                continue;
+            if (errno == EIDRM || errno == EINVAL)
+                return;
+            break;
+        }
+
+        pid_t pid = msg.grupa.proces_id;
+        if (pid > 0)
+        {
+            (void)kill(pid, SIGTERM);
+        }
     }
 }

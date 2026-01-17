@@ -1,6 +1,9 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include "log.h"
+
+#include <stdio.h>     // printf
 #include <sys/types.h> // pid_t
 #include <time.h>      // time_t
 
@@ -151,5 +154,16 @@ void czekaj_na_ture(int turn);
  * Parsuje int z napisu lub kończy proces przy błędzie.
  */
 int parsuj_int_lub_zakoncz(const char *what, const char *s);
+
+/**
+ * Inicjalizuje generator liczb pseudolosowych (rand()) dla bieżącego procesu.
+ */
+void zainicjuj_losowosc(void);
+
+/**
+ * Zamyka wszystkie procesy klientów i czyści stan: stoliki + kolejkę wejściową.
+ * Przydatne przy nagłym zamknięciu (Ctrl+C / decyzja kierownika).
+ */
+void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void);
 
 #endif // COMMON_H

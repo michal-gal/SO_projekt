@@ -21,11 +21,26 @@ static char arg_msgq[32];
 static pid_t children_pgid = -1;
 
 static volatile sig_atomic_t sigint_requested = 0;
+static volatile sig_atomic_t shutdown_signal = 0;
+
+static const char *nazwa_sygnalu(int signo)
+{
+    switch (signo)
+    {
+    case SIGINT:
+        return "SIGINT";
+    case SIGQUIT:
+        return "SIGQUIT";
+    default:
+        return "(nieznany)";
+    }
+}
 
 static void restauracja_on_sigint(int signo)
 {
     (void)signo;
     sigint_requested = 1;
+    shutdown_signal = signo;
     if (children_pgid > 0)
         (void)kill(-children_pgid, SIGTERM);
 }
@@ -36,9 +51,9 @@ static void restauracja_on_sigtstp(int signo)
     if (children_pgid > 0)
         (void)kill(-children_pgid, SIGTSTP);
 
-    // Zatrzymaj też proces rodzica (job control jak przy Ctrl+Z).
-    signal(SIGTSTP, SIG_DFL);
-    (void)kill(getpid(), SIGTSTP);
+    // Zatrzymaj też proces rodzica. Używamy SIGSTOP (niełapany), żeby nie wołać
+    // nie-async-signal-safe funkcji (np. signal()) w handlerze.
+    (void)kill(getpid(), SIGSTOP);
 }
 
 static void restauracja_on_sigcont(int signo)
@@ -64,12 +79,12 @@ static pid_t uruchom_potomka_exec(const char *file, const char *argv0)
     if (pid == 0)
     {
         execl(file, argv0, arg_shm, arg_sem, arg_msgq, (char *)NULL);
-        perror("execl");
+        LOGE_ERRNO("execl");
         _exit(127);
     }
     if (pid < 0)
     {
-        perror("fork");
+        LOGE_ERRNO("fork");
         _exit(1);
     }
     return pid;
@@ -126,7 +141,7 @@ static void generator_utworz_jedna_grupe(void)
 // ====== MAIN ======
 int main(void)
 {
-    srand((unsigned)time(NULL) ^ (unsigned)getpid());
+    zainicjuj_losowosc();
     stworz_ipc();
     generator_stolikow(stoliki);
     fflush(stdout); // opróżnij bufor przed fork() aby uniknąć duplikatów
@@ -187,11 +202,24 @@ int main(void)
         sleep(1);
     }
 
+    int koniec_czasu = (time(NULL) - start_czekania >= CZAS_PRACY);
+    int przerwano_sygnalem = sigint_requested;
+    int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem && !*restauracja_otwarta);
+
     *restauracja_otwarta = 0;
-    printf("\n===Czas pracy restauracji minął!===\n");
+    if (przerwano_sygnalem)
+        printf("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
+    else if (zamknieto_flaga)
+        printf("\n===Restauracja została zamknięta (sygnał z procesu wewnętrznego)!===\n");
+    else
+        printf("\n===Czas pracy restauracji minął!===\n");
     fflush(stdout);
 
     *kolej_podsumowania = 1;
+
+    // Dodatkowo: ubij klientów i wyczyść stoliki/kolejkę, żeby nie zostawić
+    // osieroconego stanu w pamięci współdzielonej przy przerwaniu.
+    zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
 
     // Prosto: kończymy wszystkie dzieci jednym mechanizmem, niezależnie od typu procesu.
     zakoncz_wszystkie_dzieci(&status);

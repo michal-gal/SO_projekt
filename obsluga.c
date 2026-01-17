@@ -38,29 +38,62 @@ static void obsluga_podaj_dania(double wydajnosc)
         dodaj_danie(tasma, c);
         sem_operacja(SEM_TASMA, 1);
 
+        LOGI("Danie za %d zł dodane na taśmę.\n", c);
+
+        // Zamówienia specjalne: nie trzymaj naraz SEM_STOLIKI i SEM_TASMA.
+        // Najpierw "zarezerwuj" zamówienia w stolikach (oznaczając ujemną ceną),
+        // potem dodaj dania na taśmę, a na końcu wyczyść rezerwacje.
+        int spec_ceny[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
+        int spec_numer_stolika[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
+        int spec_stolik_idx[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
+        int spec_grupa_idx[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
+        int spec_cnt = 0;
+
+        sem_operacja(SEM_STOLIKI, -1);
         for (int stolik = 0; stolik < MAX_STOLIKI; stolik++)
         {
             for (int grupa = 0; grupa < stoliki[stolik].liczba_grup; grupa++)
             {
-                if (stoliki[stolik].grupy[grupa].danie_specjalne != 0)
+                int cena_specjalna = stoliki[stolik].grupy[grupa].danie_specjalne;
+                if (cena_specjalna > 0 && spec_cnt < (MAX_STOLIKI * MAX_GRUP_NA_STOLIKU))
                 {
-                    int cena_specjalna = stoliki[stolik].grupy[grupa].danie_specjalne;
-                    int numer_stolika = stoliki[stolik].numer_stolika;
-                    sem_operacja(SEM_TASMA, -1);
-                    dodaj_danie(tasma, cena_specjalna);
-                    tasma[0].stolik_specjalny = numer_stolika;
-                    sem_operacja(SEM_TASMA, 1);
-                    stoliki[stolik].grupy[grupa].danie_specjalne = 0;
-
-                    int idx = cena_na_indeks(cena_specjalna);
-                    if (idx >= 0)
-                        kuchnia_dania_wydane[idx]++;
-
-                    printf("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
-                           cena_specjalna,
-                           numer_stolika);
+                    stoliki[stolik].grupy[grupa].danie_specjalne = -cena_specjalna; // claim
+                    spec_ceny[spec_cnt] = cena_specjalna;
+                    spec_numer_stolika[spec_cnt] = stoliki[stolik].numer_stolika;
+                    spec_stolik_idx[spec_cnt] = stolik;
+                    spec_grupa_idx[spec_cnt] = grupa;
+                    spec_cnt++;
                 }
             }
+        }
+        sem_operacja(SEM_STOLIKI, 1);
+
+        for (int i = 0; i < spec_cnt; i++)
+        {
+            sem_operacja(SEM_TASMA, -1);
+            dodaj_danie(tasma, spec_ceny[i]);
+            tasma[0].stolik_specjalny = spec_numer_stolika[i];
+            sem_operacja(SEM_TASMA, 1);
+
+            int idx = cena_na_indeks(spec_ceny[i]);
+            if (idx >= 0)
+                kuchnia_dania_wydane[idx]++;
+
+            LOGI("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
+                 spec_ceny[i],
+                 spec_numer_stolika[i]);
+        }
+
+        if (spec_cnt > 0)
+        {
+            sem_operacja(SEM_STOLIKI, -1);
+            for (int i = 0; i < spec_cnt; i++)
+            {
+                int *slot = &stoliki[spec_stolik_idx[i]].grupy[spec_grupa_idx[i]].danie_specjalne;
+                if (*slot == -spec_ceny[i])
+                    *slot = 0;
+            }
+            sem_operacja(SEM_STOLIKI, 1);
         }
 
         int idx = cena_na_indeks(c);
@@ -74,12 +107,14 @@ void obsluga(void)
     if (pid_obsluga_shm)
         *pid_obsluga_shm = getpid();
 
+    zainicjuj_losowosc();
+
     if (signal(SIGUSR1, obsluz_sygnal) == SIG_ERR)
-        perror("signal(SIGUSR1)");
+        LOGE_ERRNO("signal(SIGUSR1)");
     if (signal(SIGUSR2, obsluz_sygnal) == SIG_ERR)
-        perror("signal(SIGUSR2)");
+        LOGE_ERRNO("signal(SIGUSR2)");
     if (signal(SIGTERM, obsluz_sygnal) == SIG_ERR)
-        perror("signal(SIGTERM)");
+        LOGE_ERRNO("signal(SIGTERM)");
 
     sig_atomic_t ostatnia_wydajnosc = obsluga_wydajnosc;
 
@@ -95,11 +130,11 @@ void obsluga(void)
         if (biezaca_wydajnosc != ostatnia_wydajnosc)
         {
             if (biezaca_wydajnosc >= 4)
-                printf("Zwiększona wydajność obsługi (SIGUSR1)!\n");
+                LOGI("Zwiększona wydajność obsługi (SIGUSR1)!\n");
             else if (biezaca_wydajnosc <= 1)
-                printf("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
+                LOGI("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
             else
-                printf("Restauracja działa normalnie.\n");
+                LOGI("Restauracja działa normalnie.\n");
             ostatnia_wydajnosc = biezaca_wydajnosc;
         }
 
@@ -108,28 +143,46 @@ void obsluga(void)
         struct Grupa g = kolejka_pobierz();
         if (g.proces_id != 0)
         {
+            int stolik_idx = -1;
+            int log_usadzono = 0;
+            int log_numer_stolika = 0;
+            int log_zajete = 0;
+            int log_pojemnosc = 0;
+            pid_t log_pid = g.proces_id;
+
             sem_operacja(SEM_STOLIKI, -1);
-            int stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(&g);
+            stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(&g);
             if (stolik_idx >= 0)
             {
                 stoliki[stolik_idx].grupy[stoliki[stolik_idx].liczba_grup] = g;
                 stoliki[stolik_idx].zajete_miejsca += g.osoby;
                 stoliki[stolik_idx].liczba_grup++;
-                printf("Grupa usadzona: PID %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
-                       g.proces_id,
-                       stoliki[stolik_idx].numer_stolika,
-                       stoliki[stolik_idx].zajete_miejsca,
-                       stoliki[stolik_idx].pojemnosc);
+                log_usadzono = 1;
+                log_numer_stolika = stoliki[stolik_idx].numer_stolika;
+                log_zajete = stoliki[stolik_idx].zajete_miejsca;
+                log_pojemnosc = stoliki[stolik_idx].pojemnosc;
             }
             sem_operacja(SEM_STOLIKI, 1);
+
+            if (log_usadzono)
+                LOGI("Grupa usadzona: PID %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
+                     log_pid,
+                     log_numer_stolika,
+                     log_zajete,
+                     log_pojemnosc);
+
+            if (stolik_idx < 0 && *restauracja_otwarta)
+                kolejka_dodaj(g);
         }
 
         obsluga_podaj_dania(wydajnosc);
         sleep(1);
     }
 
+    // Czekaj na zakończenie obsługi wszystkich grup
     czekaj_na_ture(1);
 
+    // Podsumowanie
     printf("\n=== PODSUMOWANIE KASY ===\n");
     int kasa_suma = 0;
     for (int i = 0; i < 6; i++)
@@ -171,7 +224,7 @@ int main(int argc, char **argv)
 {
     if (argc != 4)
     {
-        fprintf(stderr, "Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
         return 1;
     }
 

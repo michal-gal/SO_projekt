@@ -1,11 +1,14 @@
 CC = gcc
+LOG_LEVEL ?= 1
+
 CFLAGS = -Wall -g
+CFLAGS += -DLOG_LEVEL=$(LOG_LEVEL)
 LDFLAGS = -pthread
 TARGET = restauracja
 PROCS = klient obsluga kucharz kierownik
-HEADERS = common.h restauracja.h
+HEADERS = common.h restauracja.h log.h
 
-COMMON_OBJS = common.o
+COMMON_OBJS = common.o log.o
 
 OBJECTS_RESTAURACJA = restauracja.o $(COMMON_OBJS)
 OBJECTS_KLIENT = klient.o $(COMMON_OBJS)
@@ -36,6 +39,9 @@ restauracja.o: restauracja.c $(HEADERS)
 
 common.o: common.c $(HEADERS)
 	$(CC) $(CFLAGS) -c common.c
+
+log.o: log.c log.h
+	$(CC) $(CFLAGS) -c log.c
 
 klient.o: klient.c $(HEADERS)
 	$(CC) $(CFLAGS) -c klient.c

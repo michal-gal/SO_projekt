@@ -28,7 +28,7 @@ static void drukuj_podsumowanie_kuchni(void)
 void kucharz(void)
 {
     if (signal(SIGTERM, obsluz_sigterm) == SIG_ERR)
-        perror("signal(SIGTERM)");
+        LOGE_ERRNO("signal(SIGTERM)");
 
     while (*restauracja_otwarta && !shutdown_requested)
         sleep(1);
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 {
     if (argc != 4)
     {
-        fprintf(stderr, "Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
         return 1;
     }
 

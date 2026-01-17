@@ -1,0 +1,60 @@
+#ifndef LOG_H
+#define LOG_H
+
+#include <errno.h>  // errno
+#include <string.h> // strerror
+
+// ====== LOGOWANIE ======
+// Poziomy (compile-time):
+// - 0 = tylko błędy/podsumowania (LOGI/LOGD wyciszone)
+// - 1 = logi informacyjne (domyślnie)
+// - 2 = logi debug
+//
+// Format wpisu (prefiks dodawany automatycznie do LOGI/LOGD/LOGE):
+//   YYYY-MM-DD HH:MM:SS pid=<pid> <LEVEL> <wiadomość>
+// gdzie LEVEL to: I/D/E.
+//
+// Log do pliku (runtime):
+// - ustaw: RESTAURACJA_LOG_FILE=/ścieżka/do/pliku.log
+// - wyłącz duplikację na stdout/stderr: RESTAURACJA_LOG_STDIO=0
+//
+// Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND + write(),
+// co działa sensownie w wieloprocesowym środowisku.
+#ifndef LOG_LEVEL
+#define LOG_LEVEL 1
+#endif
+
+// Logger zapisuje do pliku, jeśli ustawisz zmienną środowiskową:
+//   RESTAURACJA_LOG_FILE=/tmp/restauracja.log
+// Domyślnie logi nadal trafiają też na stdout/stderr. Żeby to wyłączyć:
+//   RESTAURACJA_LOG_STDIO=0
+void log_init_from_env(void);
+void log_printf(char level, const char *fmt, ...);
+
+#define LOGI(...)                         \
+    do                                    \
+    {                                     \
+        if (LOG_LEVEL >= 1)               \
+            log_printf('I', __VA_ARGS__); \
+    } while (0)
+
+#define LOGD(...)                         \
+    do                                    \
+    {                                     \
+        if (LOG_LEVEL >= 2)               \
+            log_printf('D', __VA_ARGS__); \
+    } while (0)
+
+#define LOGE(...)                     \
+    do                                \
+    {                                 \
+        log_printf('E', __VA_ARGS__); \
+    } while (0)
+
+#define LOGE_ERRNO(prefix)                           \
+    do                                               \
+    {                                                \
+        LOGE("%s: %s\n", (prefix), strerror(errno)); \
+    } while (0)
+
+#endif
