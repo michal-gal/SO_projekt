@@ -29,7 +29,7 @@ const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};
 const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60};
 
 // ====== UTILS ======
-int price_to_index(int cena)
+int cena_na_indeks(int cena)
 {
     switch (cena)
     {
@@ -50,7 +50,7 @@ int price_to_index(int cena)
     }
 }
 
-int parse_int_or_die(const char *what, const char *s)
+int parsuj_int_lub_zakoncz(const char *what, const char *s)
 {
     errno = 0;
     char *end = NULL;
@@ -64,7 +64,7 @@ int parse_int_or_die(const char *what, const char *s)
 }
 
 // ====== SYNC ======
-void wait_for_turn(int turn)
+void czekaj_na_ture(int turn)
 {
     while (*kolej_podsumowania != turn)
     {
@@ -76,7 +76,7 @@ void wait_for_turn(int turn)
 }
 
 // ====== TABLES ======
-int find_table_for_group_locked(const struct Grupa *g)
+int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g)
 {
     for (int i = 0; i < MAX_STOLIKI; i++)
     {
@@ -139,7 +139,7 @@ void dodaj_danie(struct Talerzyk *tasma_local, int cena)
 }
 
 // ====== IPC ======
-void sem_op(int sem, int val)
+void sem_operacja(int sem, int val)
 {
     struct sembuf sb = {sem, val, SEM_UNDO};
     for (;;)
@@ -228,7 +228,7 @@ typedef struct
     struct Grupa grupa;
 } QueueMsg;
 
-void push(struct Grupa g)
+void kolejka_dodaj(struct Grupa g)
 {
     QueueMsg msg;
     msg.mtype = 1;
@@ -251,7 +251,7 @@ void push(struct Grupa g)
     }
 }
 
-struct Grupa pop(void)
+struct Grupa kolejka_pobierz(void)
 {
     struct Grupa g = {0};
     QueueMsg msg;

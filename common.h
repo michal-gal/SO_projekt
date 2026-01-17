@@ -75,22 +75,22 @@ struct Talerzyk
 // ====== FUNCTION DECLARATIONS ======
 
 /**
- * Performs a semaphore operation
- * @param sem - semaphore ID
- * @param val - operation value
+ * Wykonuje operację na semaforze.
+ * @param sem - indeks semafora
+ * @param val - wartość operacji
  */
-void sem_op(int sem, int val);
+void sem_operacja(int sem, int val);
 
 /**
- * Adds a group to the queue
+ * Dodaje grupę do kolejki.
  */
-void push(struct Grupa g);
+void kolejka_dodaj(struct Grupa g);
 
 /**
- * Removes a group from the queue
- * @return struct Grupa (empty if queue is empty - proces_id == 0)
+ * Pobiera grupę z kolejki.
+ * @return struct Grupa (pusta jeśli kolejka pusta - proces_id == 0)
  */
-struct Grupa pop(void);
+struct Grupa kolejka_pobierz(void);
 
 /**
  * Client process
@@ -132,15 +132,24 @@ void stworz_ipc(void);
  */
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
 
-// ====== HELPERY (wspólne) ======
+/**
+ * Zamienia cenę na indeks w tablicach.
+ */
+int cena_na_indeks(int cena);
 
-int price_to_index(int cena);
+/**
+ * Znajduje odpowiedni stolik dla grupy (zakłada, że semafor stolików jest zablokowany).
+ */
+int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g);
 
-// Wywoływać tylko przy trzymanym SEM_STOLIKI.
-int find_table_for_group_locked(const struct Grupa *g);
+/**
+ * Czeka na turę wskazaną przez wartość 'turn'.
+ */
+void czekaj_na_ture(int turn);
 
-void wait_for_turn(int turn);
-
-int parse_int_or_die(const char *what, const char *s);
+/**
+ * Parsuje int z napisu lub kończy proces przy błędzie.
+ */
+int parsuj_int_lub_zakoncz(const char *what, const char *s);
 
 #endif // COMMON_H

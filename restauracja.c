@@ -20,7 +20,7 @@ static char arg_msgq[32];
 // żeby móc zakończyć je jednym sygnałem: kill(-pgid, SIGTERM/SIGKILL).
 static pid_t children_pgid = -1;
 
-static void reap_zombies_nonblocking(int *status)
+static void zbierz_zombie_nieblokujaco(int *status)
 {
     for (;;)
     {
@@ -30,7 +30,7 @@ static void reap_zombies_nonblocking(int *status)
     }
 }
 
-static pid_t fork_exec_child(const char *file, const char *argv0)
+static pid_t uruchom_potomka_exec(const char *file, const char *argv0)
 {
     pid_t pid = fork();
     if (pid == 0)
@@ -47,7 +47,7 @@ static pid_t fork_exec_child(const char *file, const char *argv0)
     return pid;
 }
 
-static int process_group_empty(pid_t pgid)
+static int czy_grupa_procesow_pusta(pid_t pgid)
 {
     if (pgid <= 0)
         return 1;
@@ -56,7 +56,7 @@ static int process_group_empty(pid_t pgid)
     return 0;
 }
 
-static void terminate_all_children(int *status)
+static void zakoncz_wszystkie_dzieci(int *status)
 {
     const int timeout_term = 8;
     const int timeout_kill = 3;
@@ -65,21 +65,21 @@ static void terminate_all_children(int *status)
         kill(-children_pgid, SIGTERM);
 
     time_t start = time(NULL);
-    while (!process_group_empty(children_pgid) && time(NULL) - start < timeout_term)
+    while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_term)
     {
-        reap_zombies_nonblocking(status);
+        zbierz_zombie_nieblokujaco(status);
         sleep(1);
     }
 
-    if (!process_group_empty(children_pgid))
+    if (!czy_grupa_procesow_pusta(children_pgid))
     {
         if (children_pgid > 0)
             kill(-children_pgid, SIGKILL);
 
         start = time(NULL);
-        while (!process_group_empty(children_pgid) && time(NULL) - start < timeout_kill)
+        while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_kill)
         {
-            reap_zombies_nonblocking(status);
+            zbierz_zombie_nieblokujaco(status);
             sleep(1);
         }
     }
@@ -88,9 +88,9 @@ static void terminate_all_children(int *status)
         ;
 }
 
-static void generator_spawn_one_group(void)
+static void generator_utworz_jedna_grupe(void)
 {
-    pid_t pid = fork_exec_child("./klient", "klient");
+    pid_t pid = uruchom_potomka_exec("./klient", "klient");
     if (children_pgid > 0)
         (void)setpgid(pid, children_pgid);
 }
@@ -98,7 +98,7 @@ static void generator_spawn_one_group(void)
 // ====== MAIN ======
 int main(void)
 {
-    srand(time(NULL));
+    srand((unsigned)time(NULL) ^ (unsigned)getpid());
     stworz_ipc();
     generator_stolikow(stoliki);
     fflush(stdout); // opróżnij bufor przed fork() aby uniknąć duplikatów
@@ -111,23 +111,22 @@ int main(void)
     *restauracja_otwarta = 1;
     *kolej_podsumowania = 1;
 
-    pid_obsluga = fork_exec_child("./obsluga", "obsluga");
+    pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga");
     *pid_obsluga_shm = pid_obsluga;
 
     // Ustal grupę procesów dla wszystkich dzieci.
     children_pgid = pid_obsluga;
     (void)setpgid(pid_obsluga, children_pgid);
 
-    pid_kucharz = fork_exec_child("./kucharz", "kucharz");
+    pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz");
     if (children_pgid > 0)
         (void)setpgid(pid_kucharz, children_pgid);
 
-    pid_kierownik = fork_exec_child("./kierownik", "kierownik");
+    pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik");
     *pid_kierownik_shm = pid_kierownik;
     if (children_pgid > 0)
         (void)setpgid(pid_kierownik, children_pgid);
 
-    srand(getpid());
     time_t start_czekania = time(NULL);
     time_t next_spawn = start_czekania;
     int status;
@@ -135,12 +134,12 @@ int main(void)
     while (time(NULL) - start_czekania < CZAS_PRACY && *restauracja_otwarta)
     {
         // Zbieraj zakończone dzieci (klienci + ewentualnie procesy główne).
-        reap_zombies_nonblocking(&status);
+        zbierz_zombie_nieblokujaco(&status);
 
         time_t now = time(NULL);
         if (now >= next_spawn)
         {
-            generator_spawn_one_group();
+            generator_utworz_jedna_grupe();
             next_spawn = now + (rand() % 3 + 1);
         }
 
@@ -151,10 +150,10 @@ int main(void)
     printf("\n===Czas pracy restauracji minął!===\n");
     fflush(stdout);
 
-    *kolej_podsumowania = 1; //
+    *kolej_podsumowania = 1;
 
     // Prosto: kończymy wszystkie dzieci jednym mechanizmem, niezależnie od typu procesu.
-    terminate_all_children(&status);
+    zakoncz_wszystkie_dzieci(&status);
 
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);

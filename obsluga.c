@@ -8,15 +8,15 @@
 #include <sys/msg.h>
 #include <unistd.h>
 
-static volatile sig_atomic_t obsluga_mode = 0; // 0=normalnie, 1=+wydajność, -1=-wydajność
+static volatile sig_atomic_t obsluga_wydajnosc = 2; // 1=wolno, 2=normalnie, 4=szybko
 static volatile sig_atomic_t shutdown_requested = 0;
 
-static void close_restaurant_and_kill_clients(void)
+static void zamknij_restauracje_i_zakoncz_klientow(void)
 {
     printf("\n===Kierownik zamyka restaurację!===\n");
     *restauracja_otwarta = 0;
 
-    sem_op(SEM_STOLIKI, -1);
+    sem_operacja(SEM_STOLIKI, -1);
     for (int i = 0; i < MAX_STOLIKI; i++)
     {
         while (stoliki[i].liczba_grup > 0)
@@ -34,9 +34,9 @@ static void close_restaurant_and_kill_clients(void)
         }
         stoliki[i].zajete_miejsca = 0;
     }
-    sem_op(SEM_STOLIKI, 1);
+    sem_operacja(SEM_STOLIKI, 1);
 
-    // Opróżnij kolejkę komunikatów (klienci oczekujący) i ubij ich procesy.
+    // Opróżnij kolejke klientow czekajacych na wejscie i ubij ich procesy.
     struct
     {
         long mtype;
@@ -63,15 +63,16 @@ static void close_restaurant_and_kill_clients(void)
     }
 }
 
-static void on_signal(int signo)
+// Signal handler for obsluga process
+static void obsluz_sygnal(int signo)
 {
     switch (signo)
     {
     case SIGUSR1:
-        obsluga_mode = 1;
+        obsluga_wydajnosc = 4;
         break;
     case SIGUSR2:
-        obsluga_mode = -1;
+        obsluga_wydajnosc = 1;
         break;
     case SIGTERM:
         shutdown_requested = 1;
@@ -81,50 +82,24 @@ static void on_signal(int signo)
     }
 }
 
-static void obsluga_install_signal_handlers(void)
+static void obsluga_zainstaluj_handlery_sygnalow(void)
 {
-    if (signal(SIGUSR1, on_signal) == SIG_ERR)
+    if (signal(SIGUSR1, obsluz_sygnal) == SIG_ERR)
         perror("signal(SIGUSR1)");
-    if (signal(SIGUSR2, on_signal) == SIG_ERR)
+    if (signal(SIGUSR2, obsluz_sygnal) == SIG_ERR)
         perror("signal(SIGUSR2)");
-    if (signal(SIGTERM, on_signal) == SIG_ERR)
+    if (signal(SIGTERM, obsluz_sygnal) == SIG_ERR)
         perror("signal(SIGTERM)");
 }
 
-static double obsluga_get_wydajnosc_and_handle_signal(void)
+static void obsluga_usadz_jedna_grupe_z_kolejki(void)
 {
-    double wydajnosc = 2.0;
-
-    static sig_atomic_t last_mode = 999;
-    sig_atomic_t mode = obsluga_mode;
-
-    if (mode == 1)
-        wydajnosc = 4.0;
-    else if (mode == -1)
-        wydajnosc = 1.0;
-
-    if (mode != last_mode)
-    {
-        if (mode == 1)
-            printf("Zwiększona wydajność obsługi (SIGUSR1)!\n");
-        else if (mode == -1)
-            printf("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
-        else
-            printf("Restauracja działa normalnie.\n");
-        last_mode = mode;
-    }
-
-    return wydajnosc;
-}
-
-static void obsluga_seat_one_group_from_queue(void)
-{
-    struct Grupa g = pop();
+    struct Grupa g = kolejka_pobierz();
     if (g.proces_id == 0)
         return;
 
-    sem_op(SEM_STOLIKI, -1);
-    int stolik_idx = find_table_for_group_locked(&g);
+    sem_operacja(SEM_STOLIKI, -1);
+    int stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(&g);
     if (stolik_idx >= 0)
     {
         stoliki[stolik_idx].grupy[stoliki[stolik_idx].liczba_grup] = g;
@@ -136,10 +111,10 @@ static void obsluga_seat_one_group_from_queue(void)
                stoliki[stolik_idx].zajete_miejsca,
                stoliki[stolik_idx].pojemnosc);
     }
-    sem_op(SEM_STOLIKI, 1);
+    sem_operacja(SEM_STOLIKI, 1);
 }
 
-static void obsluga_serve_special_dishes_if_needed(void)
+static void obsluga_podaj_dania_specjalne_jesli_trzeba(void)
 {
     for (int stolik = 0; stolik < MAX_STOLIKI; stolik++)
     {
@@ -149,13 +124,13 @@ static void obsluga_serve_special_dishes_if_needed(void)
             {
                 int cena_specjalna = stoliki[stolik].grupy[grupa].danie_specjalne;
                 int numer_stolika = stoliki[stolik].numer_stolika;
-                sem_op(SEM_TASMA, -1);
+                sem_operacja(SEM_TASMA, -1);
                 dodaj_danie(tasma, cena_specjalna);
                 tasma[0].stolik_specjalny = numer_stolika;
-                sem_op(SEM_TASMA, 1);
+                sem_operacja(SEM_TASMA, 1);
                 stoliki[stolik].grupy[grupa].danie_specjalne = 0;
 
-                int idx = price_to_index(cena_specjalna);
+                int idx = cena_na_indeks(cena_specjalna);
                 if (idx >= 0)
                     kuchnia_dania_wydane[idx]++;
 
@@ -167,7 +142,7 @@ static void obsluga_serve_special_dishes_if_needed(void)
     }
 }
 
-static void obsluga_serve_dishes(double wydajnosc)
+static void obsluga_podaj_dania(double wydajnosc)
 {
     int serves = (int)wydajnosc;
     for (int iter = 0; iter < serves; iter++)
@@ -175,13 +150,13 @@ static void obsluga_serve_dishes(double wydajnosc)
         int ceny[] = {p10, p15, p20};
         int c = ceny[rand() % 3];
 
-        sem_op(SEM_TASMA, -1);
+        sem_operacja(SEM_TASMA, -1);
         dodaj_danie(tasma, c);
-        sem_op(SEM_TASMA, 1);
+        sem_operacja(SEM_TASMA, 1);
 
-        obsluga_serve_special_dishes_if_needed();
+        obsluga_podaj_dania_specjalne_jesli_trzeba();
 
-        int idx = price_to_index(c);
+        int idx = cena_na_indeks(c);
         if (idx >= 0)
             kuchnia_dania_wydane[idx]++;
     }
@@ -191,24 +166,38 @@ void obsluga(void)
 {
     if (pid_obsluga_shm)
         *pid_obsluga_shm = getpid();
-    obsluga_install_signal_handlers();
+    obsluga_zainstaluj_handlery_sygnalow();
+
+    sig_atomic_t ostatnia_wydajnosc = obsluga_wydajnosc;
 
     while (*restauracja_otwarta)
     {
         if (shutdown_requested)
         {
             shutdown_requested = 0;
-            close_restaurant_and_kill_clients();
+            zamknij_restauracje_i_zakoncz_klientow();
             break;
         }
 
-        double wydajnosc = obsluga_get_wydajnosc_and_handle_signal();
-        obsluga_seat_one_group_from_queue();
-        obsluga_serve_dishes(wydajnosc);
+        sig_atomic_t biezaca_wydajnosc = obsluga_wydajnosc;
+        if (biezaca_wydajnosc != ostatnia_wydajnosc)
+        {
+            if (biezaca_wydajnosc >= 4)
+                printf("Zwiększona wydajność obsługi (SIGUSR1)!\n");
+            else if (biezaca_wydajnosc <= 1)
+                printf("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
+            else
+                printf("Restauracja działa normalnie.\n");
+            ostatnia_wydajnosc = biezaca_wydajnosc;
+        }
+
+        double wydajnosc = (double)biezaca_wydajnosc;
+        obsluga_usadz_jedna_grupe_z_kolejki();
+        obsluga_podaj_dania(wydajnosc);
         sleep(1);
     }
 
-    wait_for_turn(1);
+    czekaj_na_ture(1);
 
     printf("\n=== PODSUMOWANIE KASY ===\n");
     int kasa_suma = 0;
@@ -225,7 +214,7 @@ void obsluga(void)
     {
         if (tasma[i].cena != 0)
         {
-            int idx = price_to_index(tasma[i].cena);
+            int idx = cena_na_indeks(tasma[i].cena);
             if (idx >= 0)
                 tasma_dania_niesprzedane[idx]++;
         }
@@ -255,9 +244,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int shm = parse_int_or_die("shm_id", argv[1]);
-    int sem = parse_int_or_die("sem_id", argv[2]);
-    msgq_id = parse_int_or_die("msgq_id", argv[3]);
+    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
+    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
+    msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
     dolacz_ipc(shm, sem);
     obsluga();
     return 0;

@@ -6,7 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static struct Grupa init_group(void)
+static struct Grupa inicjalizuj_grupe(void)
 {
     struct Grupa g;
     g.proces_id = getpid();
@@ -21,10 +21,10 @@ static struct Grupa init_group(void)
     return g;
 }
 
-static void seat_vip_group(struct Grupa *g)
+static void usadz_grupe_vip(struct Grupa *g)
 {
-    sem_op(SEM_STOLIKI, -1);
-    int i = find_table_for_group_locked(g);
+    sem_operacja(SEM_STOLIKI, -1);
+    int i = znajdz_stolik_dla_grupy_zablokowanej(g);
     if (i >= 0)
     {
         stoliki[i].grupy[stoliki[i].liczba_grup] = *g;
@@ -40,12 +40,12 @@ static void seat_vip_group(struct Grupa *g)
                stoliki[i].pojemnosc);
         g->stolik_przydzielony = i;
     }
-    sem_op(SEM_STOLIKI, 1);
+    sem_operacja(SEM_STOLIKI, 1);
 }
 
-static int wait_for_table_assignment(struct Grupa *g)
+static int czekaj_na_przydzial_stolika(struct Grupa *g)
 {
-    push(*g);
+    kolejka_dodaj(*g);
     printf("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
            g->proces_id,
            g->osoby,
@@ -56,7 +56,7 @@ static int wait_for_table_assignment(struct Grupa *g)
     pid_t moj_proces_id = g->proces_id;
     while (g->stolik_przydzielony == -1 && *restauracja_otwarta)
     {
-        sem_op(SEM_STOLIKI, -1);
+        sem_operacja(SEM_STOLIKI, -1);
         for (int i = 0; i < MAX_STOLIKI; i++)
         {
             for (int j = 0; j < stoliki[i].liczba_grup; j++)
@@ -71,7 +71,7 @@ static int wait_for_table_assignment(struct Grupa *g)
             if (g->stolik_przydzielony != -1)
                 break;
         }
-        sem_op(SEM_STOLIKI, 1);
+        sem_operacja(SEM_STOLIKI, 1);
         sleep(1);
     }
 
@@ -83,7 +83,7 @@ static int wait_for_table_assignment(struct Grupa *g)
     return 0;
 }
 
-static void order_special_if_needed(struct Grupa *g, int *dania_do_pobrania, time_t *czas_start_dania, int timeout_dania)
+static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, time_t *czas_start_dania, int timeout_dania)
 {
     if (time(NULL) - *czas_start_dania <= timeout_dania)
         return;
@@ -95,7 +95,7 @@ static void order_special_if_needed(struct Grupa *g, int *dania_do_pobrania, tim
     g->danie_specjalne = c;
     (*dania_do_pobrania)++;
 
-    sem_op(SEM_STOLIKI, -1);
+    sem_operacja(SEM_STOLIKI, -1);
     for (int j = 0; j < stoliki[g->stolik_przydzielony].liczba_grup; j++)
     {
         if (stoliki[g->stolik_przydzielony].grupy[j].proces_id == g->proces_id)
@@ -104,7 +104,7 @@ static void order_special_if_needed(struct Grupa *g, int *dania_do_pobrania, tim
             break;
         }
     }
-    sem_op(SEM_STOLIKI, 1);
+    sem_operacja(SEM_STOLIKI, 1);
 
     printf("Grupa %d zamawia danie specjalne za: %d zł. \n", g->proces_id, g->danie_specjalne);
     *czas_start_dania = time(NULL);
@@ -117,20 +117,20 @@ typedef enum
     TAKE_SKIPPED_OTHER_TABLE = 2,
 } TakeDishResult;
 
-static TakeDishResult try_take_dish(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania)
+static TakeDishResult sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania)
 {
-    sem_op(SEM_TASMA, -1);
+    sem_operacja(SEM_TASMA, -1);
     if (tasma[g->stolik_przydzielony].cena != 0)
     {
         if (tasma[g->stolik_przydzielony].stolik_specjalny != 0 &&
             tasma[g->stolik_przydzielony].stolik_specjalny != stoliki[g->stolik_przydzielony].numer_stolika)
         {
-            sem_op(SEM_TASMA, 1);
+            sem_operacja(SEM_TASMA, 1);
             return TAKE_SKIPPED_OTHER_TABLE;
         }
 
         int cena = tasma[g->stolik_przydzielony].cena;
-        int idx = price_to_index(cena);
+        int idx = cena_na_indeks(cena);
         if (idx >= 0)
             g->pobrane_dania[idx]++;
 
@@ -146,18 +146,18 @@ static TakeDishResult try_take_dish(struct Grupa *g, int *dania_pobrane, int dan
         tasma[g->stolik_przydzielony].stolik_specjalny = 0;
         *czas_start_dania = time(NULL);
 
-        sem_op(SEM_TASMA, 1);
+        sem_operacja(SEM_TASMA, 1);
         return TAKE_TAKEN;
     }
 
-    sem_op(SEM_TASMA, 1);
+    sem_operacja(SEM_TASMA, 1);
     return TAKE_NONE;
 }
 
-static void pay_for_dishes(const struct Grupa *g)
+static void zaplac_za_dania(const struct Grupa *g)
 {
     printf("Grupa %d przy stoliku %d gotowa do płatności\n", g->proces_id, stoliki[g->stolik_przydzielony].numer_stolika);
-    sem_op(SEM_TASMA, -1);
+    sem_operacja(SEM_TASMA, -1);
     for (int i = 0; i < 6; i++)
     {
         if (g->pobrane_dania[i] == 0)
@@ -170,12 +170,12 @@ static void pay_for_dishes(const struct Grupa *g)
                CENY_DAN[i],
                kwota);
     }
-    sem_op(SEM_TASMA, 1);
+    sem_operacja(SEM_TASMA, 1);
 }
 
-static void leave_table(const struct Grupa *g)
+static void opusc_stolik(const struct Grupa *g)
 {
-    sem_op(SEM_STOLIKI, -1);
+    sem_operacja(SEM_STOLIKI, -1);
     printf("Grupa %d przy stoliku %d opuszcza restaurację.\n", g->proces_id, stoliki[g->stolik_przydzielony].numer_stolika);
 
     for (int j = 0; j < stoliki[g->stolik_przydzielony].liczba_grup; j++)
@@ -192,10 +192,10 @@ static void leave_table(const struct Grupa *g)
             break;
         }
     }
-    sem_op(SEM_STOLIKI, 1);
+    sem_operacja(SEM_STOLIKI, 1);
 }
 
-static void wait_for_dishes_loop(struct Grupa *g)
+static void petla_czekania_na_dania(struct Grupa *g)
 {
     int dania_pobrane = 0;
     int dania_do_pobrania = rand() % 8 + 3;
@@ -210,9 +210,9 @@ static void wait_for_dishes_loop(struct Grupa *g)
             break;
         }
 
-        order_special_if_needed(g, &dania_do_pobrania, &czas_start_dania, timeout_dania);
+        zamow_specjalne_jesli_trzeba(g, &dania_do_pobrania, &czas_start_dania, timeout_dania);
 
-        TakeDishResult take_res = try_take_dish(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
+        TakeDishResult take_res = sprobuj_pobrac_danie(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
         if (take_res == TAKE_SKIPPED_OTHER_TABLE)
         {
             sleep(1);
@@ -225,21 +225,21 @@ static void wait_for_dishes_loop(struct Grupa *g)
 
 void klient(void)
 {
-    struct Grupa g = init_group();
+    struct Grupa g = inicjalizuj_grupe();
 
     if (g.vip)
     {
-        seat_vip_group(&g);
+        usadz_grupe_vip(&g);
     }
     else
     {
-        if (wait_for_table_assignment(&g) != 0)
+        if (czekaj_na_przydzial_stolika(&g) != 0)
             exit(0);
     }
 
-    wait_for_dishes_loop(&g);
-    pay_for_dishes(&g);
-    leave_table(&g);
+    petla_czekania_na_dania(&g);
+    zaplac_za_dania(&g);
+    opusc_stolik(&g);
 
     exit(0);
 }
@@ -252,9 +252,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int shm = parse_int_or_die("shm_id", argv[1]);
-    int sem = parse_int_or_die("sem_id", argv[2]);
-    msgq_id = parse_int_or_die("msgq_id", argv[3]);
+    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
+    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
+    msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
     dolacz_ipc(shm, sem);
     klient();
     return 0;

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static void print_kitchen_summary(void)
+static void drukuj_podsumowanie_kuchni(void)
 {
     printf("\n=== PODSUMOWANIE KUCHNI ===\n");
     int kuchnia_suma = 0;
@@ -21,9 +21,9 @@ void kucharz(void)
     while (*restauracja_otwarta)
         sleep(1);
 
-    wait_for_turn(2);
+    czekaj_na_ture(2);
 
-    print_kitchen_summary();
+    drukuj_podsumowanie_kuchni();
 
     printf("Kucharz kończy pracę.\n");
     printf("======================\n");
@@ -42,9 +42,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int shm = parse_int_or_die("shm_id", argv[1]);
-    int sem = parse_int_or_die("sem_id", argv[2]);
-    msgq_id = parse_int_or_die("msgq_id", argv[3]);
+    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
+    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
+    msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
     dolacz_ipc(shm, sem);
     kucharz();
     return 0;

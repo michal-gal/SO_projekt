@@ -4,14 +4,68 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/msg.h>
 #include <unistd.h>
 
-static void kierownik_update_signal(void)
+static void kierownik_zamknij_restauracje_i_zakoncz_klientow(void)
+{
+    printf("\n===Kierownik zamyka restaurację (sam)===\n");
+    *restauracja_otwarta = 0;
+
+    sem_operacja(SEM_STOLIKI, -1);
+    for (int i = 0; i < MAX_STOLIKI; i++)
+    {
+        while (stoliki[i].liczba_grup > 0)
+        {
+            int j = stoliki[i].liczba_grup - 1;
+            if (stoliki[i].grupy[j].proces_id != 0)
+            {
+                pid_t pid = stoliki[i].grupy[j].proces_id;
+                printf("Kierownik: zamykanie procesu klienta %d przy stoliku %d\n", pid, i);
+                kill(pid, SIGTERM);
+                stoliki[i].zajete_miejsca -= stoliki[i].grupy[j].osoby;
+            }
+            memset(&stoliki[i].grupy[j], 0, sizeof(struct Grupa));
+            stoliki[i].liczba_grup--;
+        }
+        stoliki[i].zajete_miejsca = 0;
+    }
+    sem_operacja(SEM_STOLIKI, 1);
+
+    // Opróżnij kolejkę klientow czekających na wejście i zakończ ich procesy.
+    struct
+    {
+        long mtype;
+        struct Grupa grupa;
+    } msg;
+
+    for (;;)
+    {
+        ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
+        if (r < 0)
+        {
+            if (errno == ENOMSG)
+                break;
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+
+        if (msg.grupa.proces_id != 0)
+        {
+            printf("Kierownik: zamykanie procesu klienta %d z kolejki\n", msg.grupa.proces_id);
+            kill(msg.grupa.proces_id, SIGTERM);
+        }
+    }
+}
+
+static void kierownik_wyslij_sygnal(void)
 {
     // Używamy sygnałów do komunikacji z obsługą:
     // - SIGUSR1: zwiększ wydajność
     // - SIGUSR2: zmniejsz wydajność
-    // - SIGTERM: zamknij restaurację i zakończ klientów (obsługa ubija klientów)
+    // - SIGTERM: zamknij restaurację i zakończ klientów (kierownik ubija klientów)
     // Pozostałe wartości = brak akcji (normalna praca).
     int v = rand() % 50;
     pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0; // Pobierz PID obsługi z pamięci współdzielonej.
@@ -36,12 +90,8 @@ static void kierownik_update_signal(void)
     }
     else if (v == 3)
     {
-        if (pid_obsl > 0)
-        {
-            if (kill(pid_obsl, SIGTERM) != 0 && errno != ESRCH)
-                perror("kill(SIGTERM) obsluga");
-        }
-        printf("Kierownik zamyka restaurację: SIGTERM do obsługi (PID %d)\n", pid_obsl);
+        kierownik_zamknij_restauracje_i_zakoncz_klientow();
+        printf("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
     }
     else
     {
@@ -56,11 +106,11 @@ void kierownik(void)
 
     while (*restauracja_otwarta)
     {
-        kierownik_update_signal();
+        kierownik_wyslij_sygnal();
         sleep(1);
     }
 
-    wait_for_turn(3);
+    czekaj_na_ture(3);
 
     printf("Kierownik kończy pracę.\n");
     fflush(stdout);
@@ -75,9 +125,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int shm = parse_int_or_die("shm_id", argv[1]);
-    int sem = parse_int_or_die("sem_id", argv[2]);
-    msgq_id = parse_int_or_die("msgq_id", argv[3]);
+    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
+    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
+    msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
     dolacz_ipc(shm, sem);
     kierownik();
     return 0;
