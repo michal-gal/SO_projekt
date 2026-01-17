@@ -1,6 +1,12 @@
 #ifndef PROCESY_H
 #define PROCESY_H
 
+// Feature-test macro for POSIX APIs like sigaction/SA_RESTART.
+// Must be defined before including any system headers.
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <sys/types.h> // pid_t
 #include <time.h>      // time_t
 
@@ -17,7 +23,6 @@
 #define p60 60                                        // ceny dań 6
 #define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4) // maksymalna liczba osób przy stolikach
 #define MAX_STOLIKI (X1 + X2 + X3 + X4)               // maksymalna liczba stolików
-#define MAX_KOLEJKA 500                               // maksymalna liczba grup w kolejce
 #define MAX_TASMA 100                                 // maksymalna długość taśmy
 #define MAX_GRUP_NA_STOLIKU 4                         // maksymalna liczba grup na jednym stoliku
 #define TP 10                                         // godzina otwarcia restauracji
@@ -29,9 +34,7 @@
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;          // ID pamięci współdzielonej i semaforów
 extern int msgq_id;                 // ID kolejki komunikatów (System V)
-extern struct Kolejka *kolejka;     // wskaźnik na kolejkę
 extern struct Stolik *stoliki;      // wskaźnik na tablicę stolików
-extern int *sygnal_kierownika;      // wskaźnik na sygnał kierownika
 extern int *restauracja_otwarta;    // wskaźnik na stan restauracji
 extern int *aktywni_klienci;        // wskaźnik na liczbę aktywnych klientów
 extern int *kuchnia_dania_wydane;   // liczba wydanych dań przez kuchnię
@@ -46,7 +49,7 @@ extern pid_t *pid_obsluga_shm;
 extern pid_t *pid_kierownik_shm;
 
 // ====== SEMAFORY IDS ======
-#define SEM_KOLEJKA 0
+#define SEM_AKTYWNI_KLIENCI 0 // mutex dla licznika aktywnych klientów
 #define SEM_STOLIKI 1
 #define SEM_TASMA 2
 
@@ -61,12 +64,6 @@ struct Grupa
     time_t wejscie;
     int pobrane_dania[6]; // liczba pobranych dań
     int danie_specjalne;  // jeśli zamówiono danie specjalne to jest cena dania, 0 jeśli nie
-};
-
-struct Kolejka
-{
-    struct Grupa q[MAX_KOLEJKA];
-    int przod, tyl, ilosc;
 };
 
 struct Stolik
@@ -152,5 +149,16 @@ void stworz_ipc(void);
  * Expects shm_id and sem_id created by the parent process.
  */
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
+
+// ====== HELPERY (wspólne) ======
+
+int price_to_index(int cena);
+
+// Wywoływać tylko przy trzymanym SEM_STOLIKI.
+int find_table_for_group_locked(const struct Grupa *g);
+
+void wait_for_turn(int turn);
+void wait_until_no_active_clients(void);
+void wait_until_closed_and_no_active_clients(void);
 
 #endif // PROCESY_H

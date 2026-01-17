@@ -1,4 +1,4 @@
-#include "procesy_internal.h"
+#include "procesy.h"
 
 #include <errno.h>
 #include <signal.h>
