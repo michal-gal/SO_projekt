@@ -6,6 +6,9 @@
 #include <string.h>
 #include <unistd.h>
 
+static volatile sig_atomic_t obsluga_mode = 0; // 0=normalnie, 1=+wydajność, -1=-wydajność
+static volatile sig_atomic_t shutdown_requested = 0;
+
 static void close_restaurant_and_kill_clients(void)
 {
     printf("\n===Kierownik zamyka restaurację!===\n");
@@ -45,27 +48,64 @@ static void close_restaurant_and_kill_clients(void)
     sem_op(SEM_KOLEJKA, 1);
 }
 
+static void on_sigusr1(int signo)
+{
+    (void)signo;
+    obsluga_mode = 1;
+}
+
+static void on_sigusr2(int signo)
+{
+    (void)signo;
+    obsluga_mode = -1;
+}
+
+static void on_sigterm(int signo)
+{
+    (void)signo;
+    shutdown_requested = 1;
+}
+
+static void obsluga_install_signal_handlers(void)
+{
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+
+    sa.sa_handler = on_sigusr1;
+    if (sigaction(SIGUSR1, &sa, NULL) != 0)
+        perror("sigaction(SIGUSR1)");
+
+    sa.sa_handler = on_sigusr2;
+    if (sigaction(SIGUSR2, &sa, NULL) != 0)
+        perror("sigaction(SIGUSR2)");
+
+    sa.sa_handler = on_sigterm;
+    if (sigaction(SIGTERM, &sa, NULL) != 0)
+        perror("sigaction(SIGTERM)");
+}
+
 static double obsluga_get_wydajnosc_and_handle_signal(void)
 {
     double wydajnosc = 2.0;
 
-    if (*sygnal_kierownika == 1)
-    {
+    static sig_atomic_t last_mode = 999;
+    sig_atomic_t mode = obsluga_mode;
+
+    if (mode == 1)
         wydajnosc = 4.0;
-        printf("Zwiększona wydajność obsługi!\n");
-    }
-    if (*sygnal_kierownika == 2)
-    {
+    else if (mode == -1)
         wydajnosc = 1.0;
-        printf("Zmniejszona wydajność obsługi!\n");
-    }
-    if (*sygnal_kierownika == 3)
+
+    if (mode != last_mode)
     {
-        close_restaurant_and_kill_clients();
-    }
-    else
-    {
-        printf("Restauracja działa normalnie.\n");
+        if (mode == 1)
+            printf("Zwiększona wydajność obsługi (SIGUSR1)!\n");
+        else if (mode == -1)
+            printf("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
+        else
+            printf("Restauracja działa normalnie.\n");
+        last_mode = mode;
     }
 
     return wydajnosc;
@@ -143,8 +183,19 @@ static void obsluga_serve_dishes(double wydajnosc)
 
 void obsluga(void)
 {
+    if (pid_obsluga_shm)
+        *pid_obsluga_shm = getpid();
+    obsluga_install_signal_handlers();
+
     while (*restauracja_otwarta)
     {
+        if (shutdown_requested)
+        {
+            shutdown_requested = 0;
+            close_restaurant_and_kill_clients();
+            break;
+        }
+
         double wydajnosc = obsluga_get_wydajnosc_and_handle_signal();
         obsluga_seat_one_group_from_queue();
         obsluga_serve_dishes(wydajnosc);

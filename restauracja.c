@@ -52,6 +52,7 @@ int main(void)
         perror("fork (obsluga)");
         _exit(1);
     }
+    *pid_obsluga_shm = pid_obsluga;
 
     pid_kucharz = fork();
     if (pid_kucharz == 0)
@@ -78,6 +79,7 @@ int main(void)
         perror("fork (kierownik)");
         exit(1);
     }
+    *pid_kierownik_shm = pid_kierownik;
 
     pid_generator = fork();
     if (pid_generator == 0)

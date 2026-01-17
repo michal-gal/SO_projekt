@@ -36,7 +36,8 @@ void stworz_ipc(void)
                 sizeof(struct Talerzyk) * MAX_TASMA +
                 sizeof(int) * 6 * 2 +
                 sizeof(int) * 4 +
-                sizeof(int) * 6;
+                sizeof(int) * 6 +
+                sizeof(pid_t) * 2;
 
     shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0600);
     void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);
@@ -56,6 +57,9 @@ void stworz_ipc(void)
     restauracja_otwarta = sygnal_kierownika + 1;
     aktywni_klienci = restauracja_otwarta + 1;
     kolej_podsumowania = aktywni_klienci + 1;
+
+    pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1);
+    pid_kierownik_shm = pid_obsluga_shm + 1;
 
     sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0666);
     semctl(sem_id, SEM_KOLEJKA, SETVAL, 1);
@@ -84,4 +88,7 @@ void dolacz_ipc(int shm_id_existing, int sem_id_existing)
     restauracja_otwarta = sygnal_kierownika + 1;
     aktywni_klienci = restauracja_otwarta + 1;
     kolej_podsumowania = aktywni_klienci + 1;
+
+    pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1);
+    pid_kierownik_shm = pid_obsluga_shm + 1;
 }

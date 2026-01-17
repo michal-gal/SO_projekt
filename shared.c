@@ -13,5 +13,8 @@ struct Talerzyk *tasma;
 int *kolej_podsumowania;
 pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
 
+pid_t *pid_obsluga_shm;
+pid_t *pid_kierownik_shm;
+
 const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};
 const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60};

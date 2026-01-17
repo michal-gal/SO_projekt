@@ -40,6 +40,9 @@ extern int *kolej_podsumowania;     // czyja kolej na podsumowanie (0=generator,
 extern const int ILOSC_STOLIKOW[4]; // liczba stolików o pojemności 1,2,3,4
 extern const int CENY_DAN[6];       // ceny dań
 extern pid_t pid_obsluga, pid_kucharz, pid_kierownik, pid_generator;
+// PID-y procesów w pamięci współdzielonej (potrzebne po exec(), np. do wysyłania sygnałów)
+extern pid_t *pid_obsluga_shm;
+extern pid_t *pid_kierownik_shm;
 
 // ====== SEMAFORY IDS ======
 #define SEM_KOLEJKA 0
