@@ -8,43 +8,9 @@
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-typedef void (*child_fn)(void);
-
-static pid_t spawn_child(child_fn fn, const char *name)
-{
-    pid_t pid = fork();
-    if (pid == 0)
-    {
-        fn();
-        _exit(0);
-    }
-    if (pid < 0)
-    {
-        fprintf(stderr, "fork failed (%s)\n", name);
-        perror("fork");
-        exit(1);
-    }
-    return pid;
-}
-
-static void signal_if_running(pid_t pid, int sig)
-{
-    if (pid > 0)
-        kill(pid, sig);
-}
-
-static const char *name_for_pid(pid_t pid, const pid_t *pids, const char *const *names, int n)
-{
-    for (int i = 0; i < n; i++)
-    {
-        if (pid == pids[i])
-            return names[i];
-    }
-    return "nieznany";
-}
 
 // ====== MAIN ======
 int main(void)
@@ -54,12 +20,77 @@ int main(void)
     generator_stolikow(stoliki);
     fflush(stdout); // opróżnij bufor przed fork() aby uniknąć duplikatów
 
+    // Przekaż shm_id/sem_id do procesów uruchamianych przez exec()
+    {
+        char buf_shm[32];
+        char buf_sem[32];
+        snprintf(buf_shm, sizeof(buf_shm), "%d", shm_id);
+        snprintf(buf_sem, sizeof(buf_sem), "%d", sem_id);
+        if (setenv("RESTAURACJA_SHM_ID", buf_shm, 1) != 0)
+        {
+            perror("setenv RESTAURACJA_SHM_ID");
+            return 1;
+        }
+        if (setenv("RESTAURACJA_SEM_ID", buf_sem, 1) != 0)
+        {
+            perror("setenv RESTAURACJA_SEM_ID");
+            return 1;
+        }
+    }
+
     *restauracja_otwarta = 1;
 
-    pid_obsluga = spawn_child(obsluga, "obsługa");
-    pid_kucharz = spawn_child(kucharz, "kucharz");
-    pid_kierownik = spawn_child(kierownik, "kierownik");
-    pid_generator = spawn_child(generator_klientow, "generator");
+    pid_obsluga = fork();
+    if (pid_obsluga == 0)
+    {
+        execl("./obsluga", "obsluga", (char *)NULL);
+        perror("execl ./obsluga");
+        _exit(127);
+    }
+    if (pid_obsluga < 0)
+    {
+        perror("fork (obsluga)");
+        _exit(1);
+    }
+
+    pid_kucharz = fork();
+    if (pid_kucharz == 0)
+    {
+        execl("./kucharz", "kucharz", (char *)NULL);
+        perror("execl ./kucharz");
+        _exit(127);
+    }
+    if (pid_kucharz < 0)
+    {
+        perror("fork (kucharz)");
+        _exit(1);
+    }
+
+    pid_kierownik = fork();
+    if (pid_kierownik == 0)
+    {
+        execl("./kierownik", "kierownik", (char *)NULL);
+        perror("execl ./kierownik");
+        _exit(127);
+    }
+    if (pid_kierownik < 0)
+    {
+        perror("fork (kierownik)");
+        exit(1);
+    }
+
+    pid_generator = fork();
+    if (pid_generator == 0)
+    {
+        execl("./generator", "generator", (char *)NULL);
+        perror("execl ./generator");
+        _exit(127);
+    }
+    if (pid_generator < 0)
+    {
+        perror("fork (generator)");
+        exit(1);
+    }
 
     // Czekaj maksymalnie CZAS_PRACY lub do sygnału zamknięcia (np. sygnał 3 od kierownika)
     time_t start_czekania = time(NULL);
@@ -73,7 +104,6 @@ int main(void)
     fflush(stdout);
 
     const pid_t pids[] = {pid_obsluga, pid_kucharz, pid_kierownik, pid_generator};
-    const char *names[] = {"obsługa", "kucharz", "kierownik", "generator"};
     const int n_pids = 4;
 
     // Czekanie na zakończenie wszystkich procesów potomnych z timeoutem
@@ -89,11 +119,7 @@ int main(void)
         if (proces > 0)
         {
             licznik_procesow++;
-            printf("Proces %d (%s) zakończył się (%d/%d)\n",
-                   proces,
-                   name_for_pid(proces, pids, names, n_pids),
-                   licznik_procesow,
-                   n_pids);
+            printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
         }
         else if (proces == 0)
         {
@@ -110,12 +136,18 @@ int main(void)
             printf("Timeout! Wymuszanie zakończenia pozostałych procesów...\n");
 
             for (int i = 0; i < n_pids; i++)
-                signal_if_running(pids[i], SIGTERM);
+            {
+                if (pids[i] > 0)
+                    kill(pids[i], SIGTERM);
+            }
 
             sleep(3);
 
             for (int i = 0; i < n_pids; i++)
-                signal_if_running(pids[i], SIGKILL);
+            {
+                if (pids[i] > 0)
+                    kill(pids[i], SIGKILL);
+            }
 
             break;
         }

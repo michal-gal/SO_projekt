@@ -143,4 +143,10 @@ void dodaj_danie(struct Talerzyk *tasma, int cena);
  */
 void stworz_ipc(void);
 
+/**
+ * Attaches to existing IPC resources after exec().
+ * Expects shm_id and sem_id created by the parent process.
+ */
+void dolacz_ipc(int shm_id_existing, int sem_id_existing);
+
 #endif // PROCESY_H

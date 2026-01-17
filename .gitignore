@@ -4,3 +4,16 @@ restauracja.o
 procesy.o
 restauracja
 pomocnicze.o
+
+# Build artifacts
+*.o
+
+# Binaries built by this project
+klient
+obsluga
+kucharz
+kierownik
+generator
+
+# Build directories
+build/
