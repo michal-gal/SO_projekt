@@ -11,6 +11,15 @@ static int log_fd = -1;
 static int log_inited = 0;
 static int log_stdio_enabled = 1;
 
+static void log_close_at_exit(void)
+{
+    if (log_fd >= 0)
+    {
+        (void)close(log_fd);
+        log_fd = -1;
+    }
+}
+
 static void log_init_once(void)
 {
     if (log_inited)
@@ -29,7 +38,10 @@ static void log_init_once(void)
 
     int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0)
+    {
         log_fd = fd;
+        atexit(log_close_at_exit);
+    }
 }
 
 void log_init_from_env(void)

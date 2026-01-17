@@ -32,6 +32,18 @@ const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań
 void zainicjuj_losowosc(void)
 {
     log_init_from_env();
+    const char *seed_env = getenv("RESTAURACJA_SEED");
+    if (seed_env && *seed_env)
+    {
+        errno = 0;
+        char *end = NULL;
+        unsigned long v = strtoul(seed_env, &end, 10);
+        if (errno == 0 && end && *end == '\0')
+        {
+            srand((unsigned)v);
+            return;
+        }
+    }
     srand((unsigned)time(NULL) ^ (unsigned)getpid());
 }
 
@@ -79,7 +91,7 @@ void czekaj_na_ture(int turn)
         struct timespec ts;
         ts.tv_sec = 0;
         ts.tv_nsec = 50L * 1000L * 1000L; // 50ms
-        nanosleep(&ts, NULL);
+        rest_nanosleep(&ts, NULL);
     }
 }
 

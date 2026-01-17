@@ -76,7 +76,7 @@ void kierownik(void)
     while (*restauracja_otwarta && !shutdown_requested)
     {
         kierownik_wyslij_sygnal();
-        sleep(1);
+        rest_sleep(1);
     }
 
     czekaj_na_ture(3);

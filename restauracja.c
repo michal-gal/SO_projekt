@@ -111,7 +111,7 @@ static void zakoncz_wszystkie_dzieci(int *status)
     while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_term)
     {
         zbierz_zombie_nieblokujaco(status);
-        sleep(1);
+        rest_sleep(1);
     }
 
     if (!czy_grupa_procesow_pusta(children_pgid))
@@ -123,7 +123,7 @@ static void zakoncz_wszystkie_dzieci(int *status)
         while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_kill)
         {
             zbierz_zombie_nieblokujaco(status);
-            sleep(1);
+            rest_sleep(1);
         }
     }
 
@@ -142,6 +142,18 @@ static void generator_utworz_jedna_grupe(void)
 int main(void)
 {
     zainicjuj_losowosc();
+
+    int czas_pracy = CZAS_PRACY;
+    const char *czas_env = getenv("RESTAURACJA_CZAS_PRACY");
+    if (czas_env && *czas_env)
+    {
+        errno = 0;
+        char *end = NULL;
+        long v = strtol(czas_env, &end, 10);
+        if (errno == 0 && end && *end == '\0' && v > 0)
+            czas_pracy = (int)v;
+    }
+
     stworz_ipc();
     generator_stolikow(stoliki);
     fflush(stdout); // opróżnij bufor przed fork() aby uniknąć duplikatów
@@ -181,7 +193,7 @@ int main(void)
     time_t next_spawn = start_czekania;
     int status;
 
-    while (time(NULL) - start_czekania < CZAS_PRACY && *restauracja_otwarta)
+    while (time(NULL) - start_czekania < czas_pracy && *restauracja_otwarta)
     {
         if (sigint_requested)
         {
@@ -199,10 +211,10 @@ int main(void)
             next_spawn = now + (rand() % 3 + 1);
         }
 
-        sleep(1);
+        rest_sleep(1);
     }
 
-    int koniec_czasu = (time(NULL) - start_czekania >= CZAS_PRACY);
+    int koniec_czasu = (time(NULL) - start_czekania >= czas_pracy);
     int przerwano_sygnalem = sigint_requested;
     int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem && !*restauracja_otwarta);
 
@@ -210,7 +222,7 @@ int main(void)
     if (przerwano_sygnalem)
         printf("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
     else if (zamknieto_flaga)
-        printf("\n===Restauracja została zamknięta (sygnał z procesu wewnętrznego)!===\n");
+        printf("\n===Restauracja została zamknięta normalnie!===\n");
     else
         printf("\n===Czas pracy restauracji minął!===\n");
     fflush(stdout);

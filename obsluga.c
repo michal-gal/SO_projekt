@@ -176,7 +176,7 @@ void obsluga(void)
         }
 
         obsluga_podaj_dania(wydajnosc);
-        sleep(1);
+        rest_sleep(1);
     }
 
     // Czekaj na zakończenie obsługi wszystkich grup

@@ -31,7 +31,7 @@ void kucharz(void)
         LOGE_ERRNO("signal(SIGTERM)");
 
     while (*restauracja_otwarta && !shutdown_requested)
-        sleep(1);
+        rest_sleep(1);
 
     czekaj_na_ture(2);
 

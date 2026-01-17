@@ -6,6 +6,28 @@
 #include <stdio.h>     // printf
 #include <sys/types.h> // pid_t
 #include <time.h>      // time_t
+#include <unistd.h>    // sleep
+
+static inline unsigned rest_sleep(unsigned seconds)
+{
+#ifdef TEST_NO_SLEEP
+    (void)seconds;
+    return 0;
+#else
+    return sleep(seconds);
+#endif
+}
+
+static inline int rest_nanosleep(const struct timespec *req, struct timespec *rem)
+{
+#ifdef TEST_NO_SLEEP
+    (void)req;
+    (void)rem;
+    return 0;
+#else
+    return nanosleep(req, rem);
+#endif
+}
 
 // ====== STAŁE ======
 #define X1 5                                          // liczba stolików o pojemności 1

@@ -3,6 +3,7 @@ LOG_LEVEL ?= 1
 
 CFLAGS = -Wall -g
 CFLAGS += -DLOG_LEVEL=$(LOG_LEVEL)
+CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread
 TARGET = restauracja
 PROCS = klient obsluga kucharz kierownik
@@ -59,4 +60,11 @@ kierownik.o: kierownik.c $(HEADERS)
 clean:
 	rm -f *.o $(TARGET) $(PROCS) generator
 
-.PHONY: all clean
+test: all
+	./tests/test_smoke.sh
+	./tests/test_signals.sh
+	./tests/test_jobcontrol.sh
+	./tests/test_no_orphans.sh
+	./tests/test_no_sleep.sh
+
+.PHONY: all clean test

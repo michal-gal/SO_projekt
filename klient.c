@@ -98,7 +98,7 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
 
         if (log_znaleziono)
             LOGI("Grupa %d znalazała swój stolik: %d\n", g->proces_id, log_numer_stolika);
-        sleep(1);
+        rest_sleep(1);
     }
 
     if (g->stolik_przydzielony == -1)
@@ -272,11 +272,11 @@ static void petla_czekania_na_dania(struct Grupa *g)
         TakeDishResult take_res = sprobuj_pobrac_danie(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
         if (take_res == TAKE_SKIPPED_OTHER_TABLE)
         {
-            sleep(1);
+            rest_sleep(1);
             continue;
         }
 
-        sleep(1);
+        rest_sleep(1);
     }
 }
 
