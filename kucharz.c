@@ -1,8 +1,17 @@
 #include "common.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+static volatile sig_atomic_t shutdown_requested = 0;
+
+static void obsluz_sigterm(int signo)
+{
+    (void)signo;
+    shutdown_requested = 1;
+}
 
 static void drukuj_podsumowanie_kuchni(void)
 {
@@ -18,7 +27,10 @@ static void drukuj_podsumowanie_kuchni(void)
 
 void kucharz(void)
 {
-    while (*restauracja_otwarta)
+    if (signal(SIGTERM, obsluz_sigterm) == SIG_ERR)
+        perror("signal(SIGTERM)");
+
+    while (*restauracja_otwarta && !shutdown_requested)
         sleep(1);
 
     czekaj_na_ture(2);

@@ -8,6 +8,14 @@
 #include <sys/msg.h>
 #include <unistd.h>
 
+static volatile sig_atomic_t shutdown_requested = 0;
+
+static void kierownik_obsluz_sigterm(int signo)
+{
+    (void)signo;
+    shutdown_requested = 1;
+}
+
 static void kierownik_zamknij_restauracje_i_zakoncz_klientow(void)
 {
     printf("\n===Kierownik zamyka restaurację (sam)===\n");
@@ -104,7 +112,10 @@ void kierownik(void)
     if (pid_kierownik_shm)
         *pid_kierownik_shm = getpid();
 
-    while (*restauracja_otwarta)
+    if (signal(SIGTERM, kierownik_obsluz_sigterm) == SIG_ERR)
+        perror("signal(SIGTERM)");
+
+    while (*restauracja_otwarta && !shutdown_requested)
     {
         kierownik_wyslij_sygnal();
         sleep(1);

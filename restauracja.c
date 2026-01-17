@@ -20,6 +20,34 @@ static char arg_msgq[32];
 // żeby móc zakończyć je jednym sygnałem: kill(-pgid, SIGTERM/SIGKILL).
 static pid_t children_pgid = -1;
 
+static volatile sig_atomic_t sigint_requested = 0;
+
+static void restauracja_on_sigint(int signo)
+{
+    (void)signo;
+    sigint_requested = 1;
+    if (children_pgid > 0)
+        (void)kill(-children_pgid, SIGTERM);
+}
+
+static void restauracja_on_sigtstp(int signo)
+{
+    (void)signo;
+    if (children_pgid > 0)
+        (void)kill(-children_pgid, SIGTSTP);
+
+    // Zatrzymaj też proces rodzica (job control jak przy Ctrl+Z).
+    signal(SIGTSTP, SIG_DFL);
+    (void)kill(getpid(), SIGTSTP);
+}
+
+static void restauracja_on_sigcont(int signo)
+{
+    (void)signo;
+    if (children_pgid > 0)
+        (void)kill(-children_pgid, SIGCONT);
+}
+
 static void zbierz_zombie_nieblokujaco(int *status)
 {
     for (;;)
@@ -118,6 +146,13 @@ int main(void)
     children_pgid = pid_obsluga;
     (void)setpgid(pid_obsluga, children_pgid);
 
+    // Job-control sygnały z terminala (Ctrl+C / Ctrl+Z / Ctrl+\) trafiają do grupy procesu rodzica.
+    // Ponieważ dzieci są w osobnej grupie, forwardujemy je, żeby program reagował jak użytkownik oczekuje.
+    signal(SIGINT, restauracja_on_sigint);
+    signal(SIGQUIT, restauracja_on_sigint);
+    signal(SIGTSTP, restauracja_on_sigtstp);
+    signal(SIGCONT, restauracja_on_sigcont);
+
     pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz");
     if (children_pgid > 0)
         (void)setpgid(pid_kucharz, children_pgid);
@@ -133,6 +168,12 @@ int main(void)
 
     while (time(NULL) - start_czekania < CZAS_PRACY && *restauracja_otwarta)
     {
+        if (sigint_requested)
+        {
+            *restauracja_otwarta = 0;
+            break;
+        }
+
         // Zbieraj zakończone dzieci (klienci + ewentualnie procesy główne).
         zbierz_zombie_nieblokujaco(&status);
 
