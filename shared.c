@@ -2,6 +2,7 @@
 
 // ====== ZMIENNE GLOBALNE (DEFINICJE) ======
 int shm_id, sem_id;
+int msgq_id;
 struct Kolejka *kolejka;
 struct Stolik *stoliki;
 int *sygnal_kierownika;

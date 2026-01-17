@@ -1,31 +1,58 @@
 #include "procesy.h"
 
-#include <string.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/msg.h>
+
+typedef struct
+{
+    long mtype;
+    struct Grupa grupa;
+} QueueMsg;
 
 void push(struct Grupa g)
 {
-    sem_op(SEM_KOLEJKA, -1);
-    if (kolejka->ilosc < MAX_KOLEJKA)
+    QueueMsg msg;
+    msg.mtype = 1;
+    msg.grupa = g;
+
+    for (;;)
     {
-        kolejka->q[kolejka->tyl] = g;
-        kolejka->tyl = (kolejka->tyl + 1) % MAX_KOLEJKA;
-        kolejka->ilosc++;
+        if (msgsnd(msgq_id, &msg, sizeof(msg.grupa), IPC_NOWAIT) == 0)
+            return;
+
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN)
+            return; // kolejka pełna - zachowanie jak wcześniej (drop)
+        if (errno == EIDRM || errno == EINVAL)
+            exit(0);
+
+        perror("msgsnd");
+        return;
     }
-    sem_op(SEM_KOLEJKA, 1);
 }
 
 struct Grupa pop(void)
 {
     struct Grupa g = {0};
-    sem_op(SEM_KOLEJKA, -1);
-    if (kolejka->ilosc == 0)
+    QueueMsg msg;
+
+    for (;;)
     {
-        sem_op(SEM_KOLEJKA, 1);
+        ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
+        if (r >= 0)
+            return msg.grupa;
+
+        if (errno == EINTR)
+            continue;
+        if (errno == ENOMSG)
+            return g;
+        if (errno == EIDRM || errno == EINVAL)
+            exit(0);
+
+        perror("msgrcv");
         return g;
     }
-    g = kolejka->q[kolejka->przod];
-    kolejka->przod = (kolejka->przod + 1) % MAX_KOLEJKA;
-    kolejka->ilosc--;
-    sem_op(SEM_KOLEJKA, 1);
-    return g;
 }

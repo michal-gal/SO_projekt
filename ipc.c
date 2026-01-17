@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ipc.h>
+#include <sys/msg.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <time.h>
@@ -65,6 +66,13 @@ void stworz_ipc(void)
     semctl(sem_id, SEM_KOLEJKA, SETVAL, 1);
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
     semctl(sem_id, SEM_TASMA, SETVAL, 1);
+
+    msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
+    if (msgq_id < 0)
+    {
+        perror("msgget");
+        exit(1);
+    }
 }
 
 void dolacz_ipc(int shm_id_existing, int sem_id_existing)

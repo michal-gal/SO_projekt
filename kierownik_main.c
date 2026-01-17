@@ -28,6 +28,7 @@ int main(void)
 {
     int shm = env_int_or_die("RESTAURACJA_SHM_ID");
     int sem = env_int_or_die("RESTAURACJA_SEM_ID");
+    msgq_id = env_int_or_die("RESTAURACJA_MSGQ_ID");
     dolacz_ipc(shm, sem);
     kierownik();
     return 0;

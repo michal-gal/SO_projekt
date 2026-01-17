@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/ipc.h>
+#include <sys/msg.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
@@ -24,8 +25,10 @@ int main(void)
     {
         char buf_shm[32];
         char buf_sem[32];
+        char buf_msgq[32];
         snprintf(buf_shm, sizeof(buf_shm), "%d", shm_id);
         snprintf(buf_sem, sizeof(buf_sem), "%d", sem_id);
+        snprintf(buf_msgq, sizeof(buf_msgq), "%d", msgq_id);
         if (setenv("RESTAURACJA_SHM_ID", buf_shm, 1) != 0)
         {
             perror("setenv RESTAURACJA_SHM_ID");
@@ -34,6 +37,11 @@ int main(void)
         if (setenv("RESTAURACJA_SEM_ID", buf_sem, 1) != 0)
         {
             perror("setenv RESTAURACJA_SEM_ID");
+            return 1;
+        }
+        if (setenv("RESTAURACJA_MSGQ_ID", buf_msgq, 1) != 0)
+        {
+            perror("setenv RESTAURACJA_MSGQ_ID");
             return 1;
         }
     }
@@ -159,6 +167,8 @@ int main(void)
 
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);
+    if (msgq_id >= 0)
+        msgctl(msgq_id, IPC_RMID, NULL);
 
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;

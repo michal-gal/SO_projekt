@@ -28,6 +28,7 @@
 
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;          // ID pamięci współdzielonej i semaforów
+extern int msgq_id;                 // ID kolejki komunikatów (System V)
 extern struct Kolejka *kolejka;     // wskaźnik na kolejkę
 extern struct Stolik *stoliki;      // wskaźnik na tablicę stolików
 extern int *sygnal_kierownika;      // wskaźnik na sygnał kierownika

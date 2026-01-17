@@ -1,9 +1,11 @@
 #include "procesy_internal.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/msg.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t obsluga_mode = 0; // 0=normalnie, 1=+wydajność, -1=-wydajność
@@ -34,18 +36,31 @@ static void close_restaurant_and_kill_clients(void)
     }
     sem_op(SEM_STOLIKI, 1);
 
-    sem_op(SEM_KOLEJKA, -1);
-    for (int i = 0; i < kolejka->ilosc; i++)
+    // Opróżnij kolejkę komunikatów (klienci oczekujący) i ubij ich procesy.
+    struct
     {
-        int j = (kolejka->przod + i) % MAX_KOLEJKA;
-        if (kolejka->q[j].proces_id != 0)
+        long mtype;
+        struct Grupa grupa;
+    } msg;
+
+    for (;;)
+    {
+        ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
+        if (r < 0)
         {
-            printf("Zamykanie procesu klienta %d z kolejki\n", kolejka->q[j].proces_id);
-            kill(kolejka->q[j].proces_id, SIGTERM);
+            if (errno == ENOMSG)
+                break;
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+
+        if (msg.grupa.proces_id != 0)
+        {
+            printf("Zamykanie procesu klienta %d z kolejki\n", msg.grupa.proces_id);
+            kill(msg.grupa.proces_id, SIGTERM);
         }
     }
-    kolejka->ilosc = 0;
-    sem_op(SEM_KOLEJKA, 1);
 }
 
 static void on_sigusr1(int signo)
