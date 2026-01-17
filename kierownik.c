@@ -14,7 +14,7 @@ static void kierownik_update_signal(void)
     // - SIGTERM: zamknij restaurację i zakończ klientów (obsługa ubija klientów)
     // Pozostałe wartości = brak akcji (normalna praca).
     int v = rand() % 50;
-    pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0;
+    pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0; // Pobierz PID obsługi z pamięci współdzielonej.
 
     if (v == 1)
     {
@@ -60,8 +60,6 @@ void kierownik(void)
         sleep(1);
     }
 
-    wait_until_no_active_clients();
-
     wait_for_turn(3);
 
     printf("Kierownik kończy pracę.\n");
@@ -69,11 +67,17 @@ void kierownik(void)
     exit(0);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    int shm = env_int_or_die("RESTAURACJA_SHM_ID");
-    int sem = env_int_or_die("RESTAURACJA_SEM_ID");
-    msgq_id = env_int_or_die("RESTAURACJA_MSGQ_ID");
+    if (argc != 4)
+    {
+        fprintf(stderr, "Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+        return 1;
+    }
+
+    int shm = parse_int_or_die("shm_id", argv[1]);
+    int sem = parse_int_or_die("sem_id", argv[2]);
+    msgq_id = parse_int_or_die("msgq_id", argv[3]);
     dolacz_ipc(shm, sem);
     kierownik();
     return 0;

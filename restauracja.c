@@ -9,50 +9,90 @@
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
-#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
-static void active_clients_inc(void)
+static char arg_shm[32];
+static char arg_sem[32];
+static char arg_msgq[32];
+
+// Wszystkie procesy potomne (obsluga/kucharz/kierownik/klienci) wrzucamy do jednej grupy,
+// żeby móc zakończyć je jednym sygnałem: kill(-pgid, SIGTERM/SIGKILL).
+static pid_t children_pgid = -1;
+
+static void reap_zombies_nonblocking(int *status)
 {
-    sem_op(SEM_AKTYWNI_KLIENCI, -1);
-    (*aktywni_klienci)++;
-    sem_op(SEM_AKTYWNI_KLIENCI, 1);
+    for (;;)
+    {
+        pid_t p = waitpid(-1, status, WNOHANG);
+        if (p <= 0)
+            break;
+    }
 }
 
-static void active_clients_dec_if_positive(void)
-{
-    sem_op(SEM_AKTYWNI_KLIENCI, -1);
-    if (*aktywni_klienci > 0)
-        (*aktywni_klienci)--;
-    sem_op(SEM_AKTYWNI_KLIENCI, 1);
-}
-
-static int active_clients_get(void)
-{
-    int value;
-    sem_op(SEM_AKTYWNI_KLIENCI, -1);
-    value = *aktywni_klienci;
-    sem_op(SEM_AKTYWNI_KLIENCI, 1);
-    return value;
-}
-
-static void generator_spawn_one_group(void)
+static pid_t fork_exec_child(const char *file, const char *argv0)
 {
     pid_t pid = fork();
     if (pid == 0)
     {
-        execl("./klient", "klient", (char *)NULL);
-        perror("execl ./klient");
+        execl(file, argv0, arg_shm, arg_sem, arg_msgq, (char *)NULL);
+        perror("execl");
         _exit(127);
     }
-    if (pid > 0)
+    if (pid < 0)
     {
-        active_clients_inc();
-        return;
+        perror("fork");
+        _exit(1);
+    }
+    return pid;
+}
+
+static int process_group_empty(pid_t pgid)
+{
+    if (pgid <= 0)
+        return 1;
+    if (kill(-pgid, 0) == -1 && errno == ESRCH)
+        return 1;
+    return 0;
+}
+
+static void terminate_all_children(int *status)
+{
+    const int timeout_term = 8;
+    const int timeout_kill = 3;
+
+    if (children_pgid > 0)
+        kill(-children_pgid, SIGTERM);
+
+    time_t start = time(NULL);
+    while (!process_group_empty(children_pgid) && time(NULL) - start < timeout_term)
+    {
+        reap_zombies_nonblocking(status);
+        sleep(1);
     }
 
-    perror("fork");
+    if (!process_group_empty(children_pgid))
+    {
+        if (children_pgid > 0)
+            kill(-children_pgid, SIGKILL);
+
+        start = time(NULL);
+        while (!process_group_empty(children_pgid) && time(NULL) - start < timeout_kill)
+        {
+            reap_zombies_nonblocking(status);
+            sleep(1);
+        }
+    }
+
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
+}
+
+static void generator_spawn_one_group(void)
+{
+    pid_t pid = fork_exec_child("./klient", "klient");
+    if (children_pgid > 0)
+        (void)setpgid(pid, children_pgid);
 }
 
 // ====== MAIN ======
@@ -63,103 +103,39 @@ int main(void)
     generator_stolikow(stoliki);
     fflush(stdout); // opróżnij bufor przed fork() aby uniknąć duplikatów
 
-    // Przekaż shm_id/sem_id do procesów uruchamianych przez exec()
-    {
-        char buf_shm[32];
-        char buf_sem[32];
-        char buf_msgq[32];
-        snprintf(buf_shm, sizeof(buf_shm), "%d", shm_id);
-        snprintf(buf_sem, sizeof(buf_sem), "%d", sem_id);
-        snprintf(buf_msgq, sizeof(buf_msgq), "%d", msgq_id);
-        if (setenv("RESTAURACJA_SHM_ID", buf_shm, 1) != 0)
-        {
-            perror("setenv RESTAURACJA_SHM_ID");
-            return 1;
-        }
-        if (setenv("RESTAURACJA_SEM_ID", buf_sem, 1) != 0)
-        {
-            perror("setenv RESTAURACJA_SEM_ID");
-            return 1;
-        }
-        if (setenv("RESTAURACJA_MSGQ_ID", buf_msgq, 1) != 0)
-        {
-            perror("setenv RESTAURACJA_MSGQ_ID");
-            return 1;
-        }
-    }
+    // Przekaż shm_id/sem_id/msgq_id do procesów uruchamianych przez exec() jako argumenty.
+    snprintf(arg_shm, sizeof(arg_shm), "%d", shm_id);
+    snprintf(arg_sem, sizeof(arg_sem), "%d", sem_id);
+    snprintf(arg_msgq, sizeof(arg_msgq), "%d", msgq_id);
 
     *restauracja_otwarta = 1;
-    // Brak osobnego procesu generatora => pomijamy "turn 0".
     *kolej_podsumowania = 1;
 
-    pid_obsluga = fork();
-    if (pid_obsluga == 0)
-    {
-        execl("./obsluga", "obsluga", (char *)NULL);
-        perror("execl ./obsluga");
-        _exit(127);
-    }
-    if (pid_obsluga < 0)
-    {
-        perror("fork (obsluga)");
-        _exit(1);
-    }
+    pid_obsluga = fork_exec_child("./obsluga", "obsluga");
     *pid_obsluga_shm = pid_obsluga;
 
-    pid_kucharz = fork();
-    if (pid_kucharz == 0)
-    {
-        execl("./kucharz", "kucharz", (char *)NULL);
-        perror("execl ./kucharz");
-        _exit(127);
-    }
-    if (pid_kucharz < 0)
-    {
-        perror("fork (kucharz)");
-        _exit(1);
-    }
+    // Ustal grupę procesów dla wszystkich dzieci.
+    children_pgid = pid_obsluga;
+    (void)setpgid(pid_obsluga, children_pgid);
 
-    pid_kierownik = fork();
-    if (pid_kierownik == 0)
-    {
-        execl("./kierownik", "kierownik", (char *)NULL);
-        perror("execl ./kierownik");
-        _exit(127);
-    }
-    if (pid_kierownik < 0)
-    {
-        perror("fork (kierownik)");
-        exit(1);
-    }
+    pid_kucharz = fork_exec_child("./kucharz", "kucharz");
+    if (children_pgid > 0)
+        (void)setpgid(pid_kucharz, children_pgid);
+
+    pid_kierownik = fork_exec_child("./kierownik", "kierownik");
     *pid_kierownik_shm = pid_kierownik;
+    if (children_pgid > 0)
+        (void)setpgid(pid_kierownik, children_pgid);
 
-    // Generator klientów działa w procesie restauracji (bez osobnego procesu generatora).
     srand(getpid());
     time_t start_czekania = time(NULL);
     time_t next_spawn = start_czekania;
     int status;
 
-    int obsluga_done = 0;
-    int kucharz_done = 0;
-    int kierownik_done = 0;
-
     while (time(NULL) - start_czekania < CZAS_PRACY && *restauracja_otwarta)
     {
         // Zbieraj zakończone dzieci (klienci + ewentualnie procesy główne).
-        for (;;)
-        {
-            pid_t p = waitpid(-1, &status, WNOHANG);
-            if (p <= 0)
-                break;
-            if (p == pid_obsluga)
-                obsluga_done = 1;
-            else if (p == pid_kucharz)
-                kucharz_done = 1;
-            else if (p == pid_kierownik)
-                kierownik_done = 1;
-            else
-                active_clients_dec_if_positive();
-        }
+        reap_zombies_nonblocking(&status);
 
         time_t now = time(NULL);
         if (now >= next_spawn)
@@ -175,118 +151,15 @@ int main(void)
     printf("\n===Czas pracy restauracji minął!===\n");
     fflush(stdout);
 
-    // Obsluga ma czekać na turn 1 po zamknięciu.
-    *kolej_podsumowania = 1;
+    *kolej_podsumowania = 1; //
 
-    const pid_t pids[] = {pid_obsluga, pid_kucharz, pid_kierownik};
-    const int n_pids = 3;
-
-    // Czekanie na zakończenie wszystkich procesów potomnych z timeoutem
-    time_t czas_start = time(NULL);
-    int licznik_procesow = 0;
-
-    // Czekamy na 3 główne procesy (obsluga, kucharz, kierownik)
-    licznik_procesow = obsluga_done + kucharz_done + kierownik_done;
-    while (licznik_procesow < n_pids)
-    {
-        int proces = waitpid(-1, &status, WNOHANG);
-
-        if (proces > 0)
-        {
-            if (proces == pid_obsluga && !obsluga_done)
-            {
-                obsluga_done = 1;
-                licznik_procesow++;
-                printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
-            }
-            else if (proces == pid_kucharz && !kucharz_done)
-            {
-                kucharz_done = 1;
-                licznik_procesow++;
-                printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
-            }
-            else if (proces == pid_kierownik && !kierownik_done)
-            {
-                kierownik_done = 1;
-                licznik_procesow++;
-                printf("Proces %d zakończył się (%d/%d)\n", proces, licznik_procesow, n_pids);
-            }
-            else
-            {
-                // klient
-                active_clients_dec_if_positive();
-            }
-        }
-        else if (proces == 0)
-        {
-            sleep(1);
-        }
-        else if (proces == -1 && errno == ECHILD)
-        {
-            printf("Wszystkie procesy zakończone.\n");
-            break;
-        }
-
-        if (time(NULL) - czas_start > 10)
-        {
-            printf("Timeout! Wymuszanie zakończenia pozostałych procesów...\n");
-
-            for (int i = 0; i < n_pids; i++)
-            {
-                if (pids[i] > 0)
-                    kill(pids[i], SIGTERM);
-            }
-
-            sleep(3);
-
-            for (int i = 0; i < n_pids; i++)
-            {
-                if (pids[i] > 0)
-                    kill(pids[i], SIGKILL);
-            }
-
-            break;
-        }
-    }
-
-    sleep(1);
-
-    // Daj klientom szansę dokończyć i zostać zebranym przez waitpid(), zanim usuniemy IPC.
-    // To jest ograniczone czasowo, żeby nie wisieć w nieskończoność przy błędnym liczniku.
-    {
-        time_t client_wait_start = time(NULL);
-        while (active_clients_get() > 0 && time(NULL) - client_wait_start < 5)
-        {
-            for (;;)
-            {
-                pid_t p = waitpid(-1, &status, WNOHANG);
-                if (p <= 0)
-                    break;
-                if (p == pid_obsluga)
-                    obsluga_done = 1;
-                else if (p == pid_kucharz)
-                    kucharz_done = 1;
-                else if (p == pid_kierownik)
-                    kierownik_done = 1;
-                else
-                    active_clients_dec_if_positive();
-            }
-
-            sleep(1);
-        }
-
-        int remaining = active_clients_get();
-        if (remaining > 0)
-            printf("Ostrzeżenie: kończę mimo aktywnych klientów: %d\n", remaining);
-    }
+    // Prosto: kończymy wszystkie dzieci jednym mechanizmem, niezależnie od typu procesu.
+    terminate_all_children(&status);
 
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);
     if (msgq_id >= 0)
         msgctl(msgq_id, IPC_RMID, NULL);
-
-    while (waitpid(-1, NULL, WNOHANG) > 0)
-        ;
 
     printf("Program zakończony.\n");
     return 0;

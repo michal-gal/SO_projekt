@@ -63,41 +63,32 @@ static void close_restaurant_and_kill_clients(void)
     }
 }
 
-static void on_sigusr1(int signo)
+static void on_signal(int signo)
 {
-    (void)signo;
-    obsluga_mode = 1;
-}
-
-static void on_sigusr2(int signo)
-{
-    (void)signo;
-    obsluga_mode = -1;
-}
-
-static void on_sigterm(int signo)
-{
-    (void)signo;
-    shutdown_requested = 1;
+    switch (signo)
+    {
+    case SIGUSR1:
+        obsluga_mode = 1;
+        break;
+    case SIGUSR2:
+        obsluga_mode = -1;
+        break;
+    case SIGTERM:
+        shutdown_requested = 1;
+        break;
+    default:
+        break;
+    }
 }
 
 static void obsluga_install_signal_handlers(void)
 {
-    struct sigaction sa;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-
-    sa.sa_handler = on_sigusr1;
-    if (sigaction(SIGUSR1, &sa, NULL) != 0)
-        perror("sigaction(SIGUSR1)");
-
-    sa.sa_handler = on_sigusr2;
-    if (sigaction(SIGUSR2, &sa, NULL) != 0)
-        perror("sigaction(SIGUSR2)");
-
-    sa.sa_handler = on_sigterm;
-    if (sigaction(SIGTERM, &sa, NULL) != 0)
-        perror("sigaction(SIGTERM)");
+    if (signal(SIGUSR1, on_signal) == SIG_ERR)
+        perror("signal(SIGUSR1)");
+    if (signal(SIGUSR2, on_signal) == SIG_ERR)
+        perror("signal(SIGUSR2)");
+    if (signal(SIGTERM, on_signal) == SIG_ERR)
+        perror("signal(SIGTERM)");
 }
 
 static double obsluga_get_wydajnosc_and_handle_signal(void)
@@ -217,8 +208,6 @@ void obsluga(void)
         sleep(1);
     }
 
-    wait_until_no_active_clients();
-
     wait_for_turn(1);
 
     printf("\n=== PODSUMOWANIE KASY ===\n");
@@ -258,11 +247,17 @@ void obsluga(void)
     exit(0);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    int shm = env_int_or_die("RESTAURACJA_SHM_ID");
-    int sem = env_int_or_die("RESTAURACJA_SEM_ID");
-    msgq_id = env_int_or_die("RESTAURACJA_MSGQ_ID");
+    if (argc != 4)
+    {
+        fprintf(stderr, "Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+        return 1;
+    }
+
+    int shm = parse_int_or_die("shm_id", argv[1]);
+    int sem = parse_int_or_die("sem_id", argv[2]);
+    msgq_id = parse_int_or_die("msgq_id", argv[3]);
     dolacz_ipc(shm, sem);
     obsluga();
     return 0;

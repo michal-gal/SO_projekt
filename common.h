@@ -30,7 +30,6 @@ extern int shm_id, sem_id;          // ID pamięci współdzielonej i semaforów
 extern int msgq_id;                 // ID kolejki komunikatów (System V)
 extern struct Stolik *stoliki;      // wskaźnik na tablicę stolików
 extern int *restauracja_otwarta;    // wskaźnik na stan restauracji
-extern int *aktywni_klienci;        // wskaźnik na liczbę aktywnych klientów
 extern int *kuchnia_dania_wydane;   // liczba wydanych dań przez kuchnię
 extern int *kasa_dania_sprzedane;   // liczba sprzedanych dań przez kasę
 extern struct Talerzyk *tasma;      // tablica reprezentująca taśmę
@@ -42,9 +41,8 @@ extern pid_t pid_obsluga, pid_kucharz, pid_kierownik;
 extern pid_t *pid_obsluga_shm;
 extern pid_t *pid_kierownik_shm;
 
-#define SEM_AKTYWNI_KLIENCI 0 // mutex dla licznika aktywnych klientów
-#define SEM_STOLIKI 1
-#define SEM_TASMA 2
+#define SEM_STOLIKI 0
+#define SEM_TASMA 1
 
 struct Grupa
 {
@@ -142,9 +140,7 @@ int price_to_index(int cena);
 int find_table_for_group_locked(const struct Grupa *g);
 
 void wait_for_turn(int turn);
-void wait_until_no_active_clients(void);
-void wait_until_closed_and_no_active_clients(void);
 
-int env_int_or_die(const char *name);
+int parse_int_or_die(const char *what, const char *s);
 
 #endif // COMMON_H

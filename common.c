@@ -16,7 +16,6 @@ int shm_id, sem_id;
 int msgq_id;
 struct Stolik *stoliki;
 int *restauracja_otwarta;
-int *aktywni_klienci;
 int *kuchnia_dania_wydane;
 int *kasa_dania_sprzedane;
 struct Talerzyk *tasma;
@@ -51,21 +50,14 @@ int price_to_index(int cena)
     }
 }
 
-int env_int_or_die(const char *name)
+int parse_int_or_die(const char *what, const char *s)
 {
-    const char *s = getenv(name);
-    if (!s || !*s)
-    {
-        fprintf(stderr, "Brak zmiennej środowiskowej: %s\n", name);
-        exit(1);
-    }
-
     errno = 0;
     char *end = NULL;
     long v = strtol(s, &end, 10);
     if (errno != 0 || end == s || (end && *end != '\0'))
     {
-        fprintf(stderr, "Nieprawidłowa wartość %s=%s\n", name, s);
+        fprintf(stderr, "Nieprawidłowa wartość %s=%s\n", what, s ? s : "(null)");
         exit(1);
     }
     return (int)v;
@@ -81,18 +73,6 @@ void wait_for_turn(int turn)
         ts.tv_nsec = 50L * 1000L * 1000L; // 50ms
         nanosleep(&ts, NULL);
     }
-}
-
-void wait_until_no_active_clients(void)
-{
-    while (*aktywni_klienci > 0)
-        sleep(1);
-}
-
-void wait_until_closed_and_no_active_clients(void)
-{
-    while (*restauracja_otwarta || *aktywni_klienci > 0)
-        sleep(1);
 }
 
 // ====== TABLES ======
@@ -183,7 +163,7 @@ void stworz_ipc(void)
     srand(time(NULL));
     int bufor = sizeof(struct Stolik) * MAX_STOLIKI +
                 sizeof(struct Talerzyk) * MAX_TASMA +
-                sizeof(int) * (6 * 2 + 3) +
+                sizeof(int) * (6 * 2 + 2) +
                 sizeof(pid_t) * 2;
 
     shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0600);
@@ -200,14 +180,12 @@ void stworz_ipc(void)
     kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);
     kasa_dania_sprzedane = kuchnia_dania_wydane + 6;
     restauracja_otwarta = kasa_dania_sprzedane + 6;
-    aktywni_klienci = restauracja_otwarta + 1;
-    kolej_podsumowania = aktywni_klienci + 1;
+    kolej_podsumowania = restauracja_otwarta + 1;
 
     pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1);
     pid_kierownik_shm = pid_obsluga_shm + 1;
 
-    sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0666);
-    semctl(sem_id, SEM_AKTYWNI_KLIENCI, SETVAL, 1);
+    sem_id = semget(IPC_PRIVATE, 2, IPC_CREAT | 0666);
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
     semctl(sem_id, SEM_TASMA, SETVAL, 1);
 
@@ -236,8 +214,7 @@ void dolacz_ipc(int shm_id_existing, int sem_id_existing)
     kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);
     kasa_dania_sprzedane = kuchnia_dania_wydane + 6;
     restauracja_otwarta = kasa_dania_sprzedane + 6;
-    aktywni_klienci = restauracja_otwarta + 1;
-    kolej_podsumowania = aktywni_klienci + 1;
+    kolej_podsumowania = restauracja_otwarta + 1;
 
     pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1);
     pid_kierownik_shm = pid_obsluga_shm + 1;
