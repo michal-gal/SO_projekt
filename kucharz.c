@@ -5,15 +5,15 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static volatile sig_atomic_t shutdown_requested = 0;
+static volatile sig_atomic_t shutdown_requested = 0; // czy został otrzymany SIGTERM
 
-static void obsluz_sigterm(int signo)
+static void obsluz_sigterm(int signo) // handler dla SIGTERM
 {
     (void)signo;
     shutdown_requested = 1;
 }
 
-static void drukuj_podsumowanie_kuchni(void)
+static void drukuj_podsumowanie_kuchni(void) // drukuje podsumowanie kuchni
 {
     printf("\n=== PODSUMOWANIE KUCHNI ===\n");
     int kuchnia_suma = 0;
@@ -25,7 +25,7 @@ static void drukuj_podsumowanie_kuchni(void)
     printf("\nSuma: %d zł\n", kuchnia_suma);
 }
 
-void kucharz(void)
+void kucharz(void) // główna funkcja procesu kucharza
 {
     if (signal(SIGTERM, obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
@@ -46,7 +46,7 @@ void kucharz(void)
     exit(0);
 }
 
-int main(int argc, char **argv)
+int main(int argc, char **argv) // punkt wejścia procesu kucharza
 {
     if (argc != 4)
     {
