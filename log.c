@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -11,7 +12,30 @@ static int log_fd = -1;
 static int log_inited = 0;
 static int log_stdio_enabled = 1;
 
-static void log_close_at_exit(void)
+static const char *log_default_path(void) // generuje domyślną ścieżkę do pliku logu
+{
+    static char path[256];
+    if (path[0] != '\0')
+        return path;
+
+    time_t now = time(NULL);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+
+    // restauracja_YYYY-MM-DD_HH-MM-SS.log
+    (void)snprintf(path, sizeof(path),
+                   "restauracja_%04d-%02d-%02d_%02d-%02d-%02d.log",
+                   tm_now.tm_year + 1900,
+                   tm_now.tm_mon + 1,
+                   tm_now.tm_mday,
+                   tm_now.tm_hour,
+                   tm_now.tm_min,
+                   tm_now.tm_sec);
+
+    return path;
+}
+
+static void log_close_at_exit(void) // zamyka plik logu przy zakończeniu programu
 {
     if (log_fd >= 0)
     {
@@ -20,7 +44,7 @@ static void log_close_at_exit(void)
     }
 }
 
-static void log_init_once(void)
+static void log_init_once(void) // inicjalizuje logowanie tylko raz
 {
     if (log_inited)
         return;
@@ -34,7 +58,11 @@ static void log_init_once(void)
     if (!path || !*path)
         path = getenv("LOG_FILE");
     if (!path || !*path)
-        return;
+    {
+        path = log_default_path();
+        // Export for fork/exec children so they use the same file.
+        (void)setenv("RESTAURACJA_LOG_FILE", path, 0);
+    }
 
     int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0)
@@ -44,12 +72,12 @@ static void log_init_once(void)
     }
 }
 
-void log_init_from_env(void)
+void log_init_from_env(void) // inicjalizuje logowanie na podstawie zmiennych środowiskowych
 {
     log_init_once();
 }
 
-void log_printf(char level, const char *fmt, ...)
+void log_printf(char level, const char *fmt, ...) // loguje komunikat z danym poziomem
 {
     log_init_once();
 
@@ -86,7 +114,6 @@ void log_printf(char level, const char *fmt, ...)
     if (prefix_len >= sizeof(prefix))
         prefix_len = sizeof(prefix) - 1;
 
-    // Keep a leading newline (if present) before the prefix.
     size_t leading_nl = 0;
     if (msg_len > 0 && msg[0] == '\n')
         leading_nl = 1;

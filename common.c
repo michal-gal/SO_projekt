@@ -156,16 +156,16 @@ void dodaj_danie(struct Talerzyk *tasma_local, int cena)
 // ====== operacje IPC ======
 void sem_operacja(int sem, int val) // zrobienie operacji na semaforze
 {
-    struct sembuf sb = {sem, val, SEM_UNDO};
+    struct sembuf sb = {sem, val, SEM_UNDO}; // SEM_UNDO aby uniknąć deadlocka przy nagłym zakończeniu procesu
     for (;;)
     {
-        if (semop(sem_id, &sb, 1) == 0)
+        if (semop(sem_id, &sb, 1) == 0) // operacja zakończona sukcesem
             return;
 
-        if (errno == EINTR)
+        if (errno == EINTR) // przerwane przez sygnał
             continue;
 
-        if (errno == EIDRM || errno == EINVAL)
+        if (errno == EIDRM || errno == EINVAL) // zasób IPC usunięty lub nieprawidłowy
             exit(0);
 
         exit(1);
@@ -174,35 +174,35 @@ void sem_operacja(int sem, int val) // zrobienie operacji na semaforze
 
 void stworz_ipc(void)
 {
-    int bufor = sizeof(struct Stolik) * MAX_STOLIKI +
-                sizeof(struct Talerzyk) * MAX_TASMA +
-                sizeof(int) * (6 * 2 + 2) +
-                sizeof(pid_t) * 2;
+    int bufor_size = sizeof(struct Stolik) * MAX_STOLIKI + // pamięć na stoliki
+                     sizeof(struct Talerzyk) * MAX_TASMA + // pamięć na taśmę
+                     sizeof(int) * (6 * 2 + 2) +           // pamięć na liczniki dań i flagi
+                     sizeof(pid_t) * 2;                    // pamięć na PID-y procesów
 
-    shm_id = shmget(IPC_PRIVATE, bufor, IPC_CREAT | 0600);
-    void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);
+    shm_id = shmget(IPC_PRIVATE, bufor_size, IPC_CREAT | 0600); // utwórz pamięć współdzieloną
+    void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);        // dołącz pamięć współdzieloną
     if (pamiec_wspoldzielona == (void *)-1)
     {
         LOGE_ERRNO("shmat");
         exit(1);
     }
-    memset(pamiec_wspoldzielona, 0, bufor);
+    memset(pamiec_wspoldzielona, 0, bufor_size); // wyczyść pamięć współdzieloną
 
-    stoliki = (struct Stolik *)pamiec_wspoldzielona;
-    tasma = (struct Talerzyk *)(stoliki + MAX_STOLIKI);
-    kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);
-    kasa_dania_sprzedane = kuchnia_dania_wydane + 6;
-    restauracja_otwarta = kasa_dania_sprzedane + 6;
-    kolej_podsumowania = restauracja_otwarta + 1;
+    stoliki = (struct Stolik *)pamiec_wspoldzielona;    // wskaźnik na stoliki
+    tasma = (struct Talerzyk *)(stoliki + MAX_STOLIKI); // wskaźnik na taśmę
+    kuchnia_dania_wydane = (int *)(tasma + MAX_TASMA);  // kuchnia - liczba wydanych dań
+    kasa_dania_sprzedane = kuchnia_dania_wydane + 6;    // kasa - liczba sprzedanych dań
+    restauracja_otwarta = kasa_dania_sprzedane + 6;     // flaga czy restauracja jest otwarta
+    kolej_podsumowania = restauracja_otwarta + 1;       // kolejka podsumowania
 
-    pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1);
-    pid_kierownik_shm = pid_obsluga_shm + 1;
+    pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
+    pid_kierownik_shm = pid_obsluga_shm + 1;             // wskaźnik na PID procesu kierownika w pamięci współdzielonej
 
-    sem_id = semget(IPC_PRIVATE, 2, IPC_CREAT | 0666);
-    semctl(sem_id, SEM_STOLIKI, SETVAL, 1);
-    semctl(sem_id, SEM_TASMA, SETVAL, 1);
+    sem_id = semget(IPC_PRIVATE, 2, IPC_CREAT | 0600); // utwórz semafory
+    semctl(sem_id, SEM_STOLIKI, SETVAL, 1);            // semafor do ochrony dostępu do stolików
+    semctl(sem_id, SEM_TASMA, SETVAL, 1);              // semafor do ochrony dostępu do taśmy
 
-    msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
+    msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (msgq_id < 0)
     {
         LOGE_ERRNO("msgget");
@@ -212,10 +212,10 @@ void stworz_ipc(void)
 
 void dolacz_ipc(int shm_id_existing, int sem_id_existing)
 {
-    shm_id = shm_id_existing;
-    sem_id = sem_id_existing;
+    shm_id = shm_id_existing; // dołącz istniejącą pamięć współdzieloną
+    sem_id = sem_id_existing; // dołącz istniejące semafory
 
-    void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0);
+    void *pamiec_wspoldzielona = shmat(shm_id, NULL, 0); // dołącz pamięć współdzieloną
     if (pamiec_wspoldzielona == (void *)-1)
     {
         LOGE_ERRNO("shmat");
@@ -235,13 +235,13 @@ void dolacz_ipc(int shm_id_existing, int sem_id_existing)
 
 // ====== kolejka ======
 
-typedef struct
+typedef struct // komunikat kolejki
 {
     long mtype;
     struct Grupa grupa;
 } QueueMsg;
 
-void kolejka_dodaj(struct Grupa g)
+void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
 {
     QueueMsg msg;
     msg.mtype = 1;
@@ -263,7 +263,7 @@ void kolejka_dodaj(struct Grupa g)
     }
 }
 
-struct Grupa kolejka_pobierz(void)
+struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
 {
     struct Grupa g = {0};
     QueueMsg msg;
@@ -285,7 +285,7 @@ struct Grupa kolejka_pobierz(void)
     }
 }
 
-void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void)
+void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich klientów i czyści stan stolików i kolejki
 {
     // Klienci usadzeni przy stolikach.
     sem_operacja(SEM_STOLIKI, -1);

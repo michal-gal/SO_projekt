@@ -13,8 +13,8 @@ make clean && make EXTRA_CFLAGS='-DTEST_NO_SLEEP'
 
 # With TEST_NO_SLEEP the program loop no longer waits, so we must force short runtime.
 # RESTAURACJA_CZAS_PRACY=1 should make it exit quickly.
-echo "[no-sleep] run with RESTAURACJA_CZAS_PRACY=1"
-RESTAURACJA_LOG_FILE="$LOG_FILE" RESTAURACJA_LOG_STDIO=0 RESTAURACJA_SEED=123 RESTAURACJA_CZAS_PRACY=1 ./restauracja
+echo "[no-sleep] run with RESTAURACJA_CZAS_PRACY=10"
+RESTAURACJA_LOG_FILE="$LOG_FILE" RESTAURACJA_LOG_STDIO=0 RESTAURACJA_SEED=123 RESTAURACJA_CZAS_PRACY=10 RESTAURACJA_DISABLE_MANAGER_CLOSE=1 ./restauracja
 
 if [[ ! -s "$LOG_FILE" ]]; then
   echo "[no-sleep] FAIL: log file not created or empty: $LOG_FILE"

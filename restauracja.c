@@ -20,8 +20,8 @@ static char arg_msgq[32];
 // żeby móc zakończyć je jednym sygnałem: kill(-pgid, SIGTERM/SIGKILL).
 static pid_t children_pgid = -1;
 
-static volatile sig_atomic_t sigint_requested = 0;
-static volatile sig_atomic_t shutdown_signal = 0;
+static volatile sig_atomic_t sigint_requested = 0; // czy został otrzymany SIGINT/SIGQUIT
+static volatile sig_atomic_t shutdown_signal = 0;  // który sygnał spowodował zamknięcie
 
 static const char *nazwa_sygnalu(int signo)
 {
@@ -36,7 +36,7 @@ static const char *nazwa_sygnalu(int signo)
     }
 }
 
-static void restauracja_on_sigint(int signo)
+static void restauracja_on_sigint(int signo) // handler dla SIGINT/SIGQUIT
 {
     (void)signo;
     sigint_requested = 1;
@@ -45,7 +45,7 @@ static void restauracja_on_sigint(int signo)
         (void)kill(-children_pgid, SIGTERM);
 }
 
-static void restauracja_on_sigtstp(int signo)
+static void restauracja_on_sigtstp(int signo) // handler dla SIGTSTP
 {
     (void)signo;
     if (children_pgid > 0)
@@ -56,14 +56,14 @@ static void restauracja_on_sigtstp(int signo)
     (void)kill(getpid(), SIGSTOP);
 }
 
-static void restauracja_on_sigcont(int signo)
+static void restauracja_on_sigcont(int signo) // handler dla SIGCONT
 {
     (void)signo;
     if (children_pgid > 0)
         (void)kill(-children_pgid, SIGCONT);
 }
 
-static void zbierz_zombie_nieblokujaco(int *status)
+static void zbierz_zombie_nieblokujaco(int *status) // zbiera zakończone procesy potomne
 {
     for (;;)
     {
@@ -73,7 +73,7 @@ static void zbierz_zombie_nieblokujaco(int *status)
     }
 }
 
-static pid_t uruchom_potomka_exec(const char *file, const char *argv0)
+static pid_t uruchom_potomka_exec(const char *file, const char *argv0) // uruchamia proces potomny przez fork()+exec()
 {
     pid_t pid = fork();
     if (pid == 0)
@@ -90,7 +90,7 @@ static pid_t uruchom_potomka_exec(const char *file, const char *argv0)
     return pid;
 }
 
-static int czy_grupa_procesow_pusta(pid_t pgid)
+static int czy_grupa_procesow_pusta(pid_t pgid) // sprawdza, czy grupa procesów o danym pgid jest pusta
 {
     if (pgid <= 0)
         return 1;
@@ -99,7 +99,7 @@ static int czy_grupa_procesow_pusta(pid_t pgid)
     return 0;
 }
 
-static void zakoncz_wszystkie_dzieci(int *status)
+static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy potomne w grupie
 {
     const int timeout_term = 8;
     const int timeout_kill = 3;
@@ -131,7 +131,7 @@ static void zakoncz_wszystkie_dzieci(int *status)
         ;
 }
 
-static void generator_utworz_jedna_grupe(void)
+static void generator_utworz_jedna_grupe(void) // tworzy jedną grupę klientów
 {
     pid_t pid = uruchom_potomka_exec("./klient", "klient");
     if (children_pgid > 0)
@@ -143,7 +143,7 @@ int main(void)
 {
     zainicjuj_losowosc();
 
-    int czas_pracy = CZAS_PRACY;
+    int czas_pracy = CZAS_PRACY; // domyślny czas pracy restauracji w sekundach
     const char *czas_env = getenv("RESTAURACJA_CZAS_PRACY");
     if (czas_env && *czas_env)
     {
@@ -154,37 +154,37 @@ int main(void)
             czas_pracy = (int)v;
     }
 
-    stworz_ipc();
-    generator_stolikow(stoliki);
-    fflush(stdout); // opróżnij bufor przed fork() aby uniknąć duplikatów
+    stworz_ipc();                // tworzy pamięć współdzieloną, semafory i kolejkę komunikatów
+    generator_stolikow(stoliki); // generuje stoliki w restauracji
+    fflush(stdout);              // opróżnij bufor przed fork() aby uniknąć duplikatów
 
     // Przekaż shm_id/sem_id/msgq_id do procesów uruchamianych przez exec() jako argumenty.
-    snprintf(arg_shm, sizeof(arg_shm), "%d", shm_id);
-    snprintf(arg_sem, sizeof(arg_sem), "%d", sem_id);
-    snprintf(arg_msgq, sizeof(arg_msgq), "%d", msgq_id);
+    snprintf(arg_shm, sizeof(arg_shm), "%d", shm_id);    // przekazywanie jako string do exec()
+    snprintf(arg_sem, sizeof(arg_sem), "%d", sem_id);    // przekazywanie jako string do exec()
+    snprintf(arg_msgq, sizeof(arg_msgq), "%d", msgq_id); // przekazywanie jako string do exec()
 
-    *restauracja_otwarta = 1;
-    *kolej_podsumowania = 1;
+    *restauracja_otwarta = 1; // ustaw flagę otwarcia restauracji
+    *kolej_podsumowania = 1;  // ustaw kolej na obsługę
 
-    pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga");
+    pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga"); // uruchom proces obsługa
     *pid_obsluga_shm = pid_obsluga;
 
-    // Ustal grupę procesów dla wszystkich dzieci.
+    // Ustal grupę procesów dla wszystkich potomkow.
     children_pgid = pid_obsluga;
     (void)setpgid(pid_obsluga, children_pgid);
 
     // Job-control sygnały z terminala (Ctrl+C / Ctrl+Z / Ctrl+\) trafiają do grupy procesu rodzica.
     // Ponieważ dzieci są w osobnej grupie, forwardujemy je, żeby program reagował jak użytkownik oczekuje.
-    signal(SIGINT, restauracja_on_sigint);
-    signal(SIGQUIT, restauracja_on_sigint);
-    signal(SIGTSTP, restauracja_on_sigtstp);
-    signal(SIGCONT, restauracja_on_sigcont);
+    signal(SIGINT, restauracja_on_sigint);   // handler dla SIGINT/SIGQUIT
+    signal(SIGQUIT, restauracja_on_sigint);  // handler dla SIGINT/SIGQUIT
+    signal(SIGTSTP, restauracja_on_sigtstp); // handler dla SIGTSTP
+    signal(SIGCONT, restauracja_on_sigcont); // handler dla SIGCONT
 
-    pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz");
+    pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz"); // uruchom proces kucharz
     if (children_pgid > 0)
         (void)setpgid(pid_kucharz, children_pgid);
 
-    pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik");
+    pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik"); // uruchom proces kierownik
     *pid_kierownik_shm = pid_kierownik;
     if (children_pgid > 0)
         (void)setpgid(pid_kierownik, children_pgid);
@@ -193,7 +193,7 @@ int main(void)
     time_t next_spawn = start_czekania;
     int status;
 
-    while (time(NULL) - start_czekania < czas_pracy && *restauracja_otwarta)
+    while (time(NULL) - start_czekania < czas_pracy && *restauracja_otwarta) // główna pętla pracy restauracji
     {
         if (sigint_requested)
         {
@@ -214,11 +214,11 @@ int main(void)
         rest_sleep(1);
     }
 
-    int koniec_czasu = (time(NULL) - start_czekania >= czas_pracy);
-    int przerwano_sygnalem = sigint_requested;
-    int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem && !*restauracja_otwarta);
+    int koniec_czasu = (time(NULL) - start_czekania >= czas_pracy);                        // czy zakończenie z powodu upływu czasu
+    int przerwano_sygnalem = sigint_requested;                                             // czy zakończenie z powodu sygnału przerwania
+    int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem && !*restauracja_otwarta); // czy zakończenie z powodu zamknięcia restauracji flagą
 
-    *restauracja_otwarta = 0;
+    *restauracja_otwarta = 0; // zamknij restaurację
     if (przerwano_sygnalem)
         printf("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
     else if (zamknieto_flaga)

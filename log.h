@@ -15,7 +15,9 @@
 // gdzie LEVEL to: I/D/E.
 //
 // Log do pliku (runtime):
-// - ustaw: RESTAURACJA_LOG_FILE=/ścieżka/do/pliku.log
+// - domyślnie (bez zmiennych środowiskowych) tworzy plik:
+//     restauracja_YYYY-MM-DD_HH-MM-SS.log
+// - albo ustaw jawnie: RESTAURACJA_LOG_FILE=/ścieżka/do/pliku.log
 // - wyłącz duplikację na stdout/stderr: RESTAURACJA_LOG_STDIO=0
 //
 // Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND + write(),

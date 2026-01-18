@@ -17,3 +17,6 @@ generator
 
 # Build directories
 build/
+
+# Runtime logs (default logger output)
+restauracja_*.log

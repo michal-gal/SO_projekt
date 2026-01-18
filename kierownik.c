@@ -26,6 +26,9 @@ static void kierownik_zamknij_restauracje_i_zakoncz_klientow(void)
 
 static void kierownik_wyslij_sygnal(void)
 {
+    const char *disable_close_env = getenv("RESTAURACJA_DISABLE_MANAGER_CLOSE");
+    int disable_close = (disable_close_env && disable_close_env[0] == '1' && disable_close_env[1] == '\0');
+
     // Używamy sygnałów do komunikacji z obsługą:
     // - SIGUSR1: zwiększ wydajność
     // - SIGUSR2: zmniejsz wydajność
@@ -54,8 +57,15 @@ static void kierownik_wyslij_sygnal(void)
     }
     else if (v == 3)
     {
-        kierownik_zamknij_restauracje_i_zakoncz_klientow();
-        LOGI("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
+        if (!disable_close)
+        {
+            kierownik_zamknij_restauracje_i_zakoncz_klientow();
+            LOGI("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
+        }
+        else
+        {
+            LOGI("Kierownik: zamykanie wyłączone (RESTAURACJA_DISABLE_MANAGER_CLOSE=1)\n");
+        }
     }
     else
     {
