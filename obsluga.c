@@ -184,16 +184,16 @@ void obsluga(void) // główna funkcja procesu obsługi
     czekaj_na_ture(1);
 
     // Podsumowanie
-    LOGI("\n=== PODSUMOWANIE KASY ===\n");
+    LOGS("\n=== PODSUMOWANIE KASY ===\n");
     int kasa_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        LOGI("Kasa - liczba sprzedanych dań za %d zł: %d\n", CENY_DAN[i], kasa_dania_sprzedane[i]);
+        LOGS("Kasa - liczba sprzedanych dań za %d zł: %d\n", CENY_DAN[i], kasa_dania_sprzedane[i]);
         kasa_suma += kasa_dania_sprzedane[i] * CENY_DAN[i];
     }
-    LOGI("Suma: %d zł\n", kasa_suma);
+    LOGS("Suma: %d zł\n", kasa_suma);
 
-    LOGI("\n=== PODSUMOWANIE OBSŁUGI ===\n");
+    LOGS("\n=== PODSUMOWANIE OBSŁUGI ===\n");
     int tasma_dania_niesprzedane[6] = {0};
     for (int i = 0; i < MAX_TASMA; i++)
     {
@@ -207,13 +207,13 @@ void obsluga(void) // główna funkcja procesu obsługi
     int tasma_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        LOGI("Taśma - liczba niesprzedanych dań za %d zł: %d\n", CENY_DAN[i], tasma_dania_niesprzedane[i]);
+        LOGS("Taśma - liczba niesprzedanych dań za %d zł: %d\n", CENY_DAN[i], tasma_dania_niesprzedane[i]);
         tasma_suma += tasma_dania_niesprzedane[i] * CENY_DAN[i];
     }
-    LOGI("===Suma: %d zł===\n", tasma_suma);
+    LOGS("===Suma: %d zł===\n", tasma_suma);
 
-    LOGI("\n\nObsługa kończy pracę.\n");
-    LOGI("======================\n");
+    LOGS("\n\nObsługa kończy pracę.\n");
+    LOGS("======================\n");
 
     *kolej_podsumowania = 2;
 

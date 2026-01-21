@@ -232,11 +232,11 @@ int main(void)
 
     *restauracja_otwarta = 0; // zamknij restaurację
     if (przerwano_sygnalem)
-        LOGI("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
+        LOGS("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
     else if (zamknieto_flaga)
-        LOGI("\n===Restauracja została zamknięta normalnie!===\n");
+        LOGS("\n===Restauracja została zamknięta normalnie!===\n");
     else
-        LOGI("\n===Czas pracy restauracji minął!===\n");
+        LOGS("\n===Czas pracy restauracji minął!===\n");
 
     *kolej_podsumowania = 1;
 
@@ -252,7 +252,7 @@ int main(void)
     if (msgq_id >= 0)
         msgctl(msgq_id, IPC_RMID, NULL);
 
-    LOGI("Program zakończony.\n");
+    LOGS("Program zakończony.\n");
     return 0;
 
 awaryjne_zamkniecie:
@@ -262,7 +262,7 @@ awaryjne_zamkniecie:
     if (kolej_podsumowania)
         *kolej_podsumowania = 1;
 
-    LOGI("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
+    LOGS("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
 
     // Jeśli cokolwiek już wystartowało (dzieci w grupie), zakończ je.
     {

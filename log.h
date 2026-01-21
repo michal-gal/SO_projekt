@@ -32,6 +32,7 @@
 //   RESTAURACJA_LOG_STDIO=0
 void log_init_from_env(void);
 void log_printf(char level, const char *fmt, ...);
+void log_printf_force_stdio(char level, const char *fmt, ...);
 
 #define LOGI(...)                         \
     do                                    \
@@ -51,6 +52,13 @@ void log_printf(char level, const char *fmt, ...);
     do                                \
     {                                 \
         log_printf('E', __VA_ARGS__); \
+    } while (0)
+
+// Podsumowania/komunikaty krytyczne: drukuj zawsze, niezależnie od LOG_LEVEL i RESTAURACJA_LOG_STDIO.
+#define LOGS(...)                                 \
+    do                                            \
+    {                                             \
+        log_printf_force_stdio('I', __VA_ARGS__); \
     } while (0)
 
 #define LOGE_ERRNO(prefix)                           \
