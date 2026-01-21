@@ -102,7 +102,7 @@ struct Talerzyk // struktura reprezentująca danie na taśmie
     int stolik_specjalny; // 0 = normalne danie, >0 = numer stolika dla zamówienia specjalnego
 };
 
-// ====== FUNCTION DECLARATIONS ======
+// ====== DEKLARACJE FUNKCJI ======
 
 /**
  * Wykonuje operację na semaforze.
@@ -118,47 +118,47 @@ void kolejka_dodaj(struct Grupa g);
 
 /**
  * Pobiera grupę z kolejki.
- * @return struct Grupa (pusta jeśli kolejka pusta - proces_id == 0)
+ * @return Struktura `struct Grupa` (pusta, jeśli kolejka jest pusta: proces_id == 0).
  */
 struct Grupa kolejka_pobierz(void);
 
 /**
- * Client process
+ * Proces klienta.
  */
 void klient(void);
 
 /**
- * Service process
+ * Proces obsługi.
  */
 void obsluga(void);
 
 /**
- * Cook process
+ * Proces kucharza.
  */
 void kucharz(void);
 
 /**
- * Manager process
+ * Proces kierownika.
  */
 void kierownik(void);
 
 /**
- * Table generator - initializes tables
+ * Generator stolików – inicjalizuje tablicę stolików.
  */
 void generator_stolikow(struct Stolik *stoliki);
 
 /**
- * Adds a dish to the conveyor belt
+ * Dodaje danie na taśmę.
  */
 void dodaj_danie(struct Talerzyk *tasma, int cena);
 
 /**
- * Creates IPC resources (shared memory and semaphores)
+ * Tworzy zasoby IPC (pamięć współdzielona i semafory).
  */
 void stworz_ipc(void);
 
 /**
- * Attaches to existing IPC resources after exec().
+ * Dołącza do istniejących zasobów IPC po exec().
  */
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
 

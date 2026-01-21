@@ -7,12 +7,12 @@
 #include <time.h>
 #include <unistd.h>
 
-static volatile sig_atomic_t shutdown_requested = 0;
+static volatile sig_atomic_t prosba_zamkniecia = 0;
 
 static void klient_obsluz_sigterm(int signo)
 {
     (void)signo;
-    shutdown_requested = 1;
+    prosba_zamkniecia = 1;
 }
 
 static struct Grupa inicjalizuj_grupe(void)
@@ -74,7 +74,7 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
          g->vip ? " [VIP]" : "");
 
     pid_t moj_proces_id = g->proces_id;
-    while (g->stolik_przydzielony == -1 && *restauracja_otwarta && !shutdown_requested)
+    while (g->stolik_przydzielony == -1 && *restauracja_otwarta && !prosba_zamkniecia)
     {
         int log_znaleziono = 0;
         int log_numer_stolika = 0;
@@ -138,12 +138,12 @@ static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania
 
 typedef enum
 {
-    TAKE_NONE = 0,
-    TAKE_TAKEN = 1,
-    TAKE_SKIPPED_OTHER_TABLE = 2,
-} TakeDishResult;
+    POBRANIE_BRAK = 0,
+    POBRANIE_POBRANO = 1,
+    POBRANIE_POMINIETO_INNY_STOLIK = 2,
+} WynikPobraniaDania;
 
-static TakeDishResult sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania)
+static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania)
 {
     int log_pobrano = 0;
     int log_cena = 0;
@@ -160,7 +160,7 @@ static TakeDishResult sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, 
             tasma[g->stolik_przydzielony].stolik_specjalny != numer_stolika)
         {
             sem_operacja(SEM_TASMA, 1);
-            return TAKE_SKIPPED_OTHER_TABLE;
+            return POBRANIE_POMINIETO_INNY_STOLIK;
         }
 
         int cena = tasma[g->stolik_przydzielony].cena;
@@ -186,11 +186,11 @@ static TakeDishResult sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, 
                  log_cena,
                  log_pobrane,
                  log_do_pobrania);
-        return TAKE_TAKEN;
+        return POBRANIE_POBRANO;
     }
 
     sem_operacja(SEM_TASMA, 1);
-    return TAKE_NONE;
+    return POBRANIE_BRAK;
 }
 
 static void zaplac_za_dania(const struct Grupa *g)
@@ -259,7 +259,7 @@ static void petla_czekania_na_dania(struct Grupa *g)
     time_t czas_start_dania = time(NULL);
     int timeout_dania = 5;
 
-    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta && !shutdown_requested)
+    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta && !prosba_zamkniecia)
     {
         if (time(NULL) - czas_start_dania > timeout_dania * 4)
         {
@@ -269,8 +269,8 @@ static void petla_czekania_na_dania(struct Grupa *g)
 
         zamow_specjalne_jesli_trzeba(g, &dania_do_pobrania, &czas_start_dania, timeout_dania);
 
-        TakeDishResult take_res = sprobuj_pobrac_danie(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
-        if (take_res == TAKE_SKIPPED_OTHER_TABLE)
+        WynikPobraniaDania wynik = sprobuj_pobrac_danie(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
+        if (wynik == POBRANIE_POMINIETO_INNY_STOLIK)
         {
             rest_sleep(1);
             continue;
@@ -297,7 +297,7 @@ void klient(void)
             exit(0);
     }
 
-    if (shutdown_requested || !*restauracja_otwarta)
+    if (prosba_zamkniecia || !*restauracja_otwarta)
     {
         if (g.stolik_przydzielony != -1)
             opusc_stolik(&g);
@@ -306,7 +306,7 @@ void klient(void)
 
     petla_czekania_na_dania(&g);
 
-    if (shutdown_requested || !*restauracja_otwarta)
+    if (prosba_zamkniecia || !*restauracja_otwarta)
     {
         opusc_stolik(&g);
         exit(0);
