@@ -184,16 +184,16 @@ void obsluga(void) // główna funkcja procesu obsługi
     czekaj_na_ture(1);
 
     // Podsumowanie
-    printf("\n=== PODSUMOWANIE KASY ===\n");
+    LOGI("\n=== PODSUMOWANIE KASY ===\n");
     int kasa_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        printf("Kasa - liczba sprzedanych dań za %d zł: %d\n", CENY_DAN[i], kasa_dania_sprzedane[i]);
+        LOGI("Kasa - liczba sprzedanych dań za %d zł: %d\n", CENY_DAN[i], kasa_dania_sprzedane[i]);
         kasa_suma += kasa_dania_sprzedane[i] * CENY_DAN[i];
     }
-    printf("Suma: %d zł\n", kasa_suma);
+    LOGI("Suma: %d zł\n", kasa_suma);
 
-    printf("\n=== PODSUMOWANIE OBSŁUGI ===\n");
+    LOGI("\n=== PODSUMOWANIE OBSŁUGI ===\n");
     int tasma_dania_niesprzedane[6] = {0};
     for (int i = 0; i < MAX_TASMA; i++)
     {
@@ -207,14 +207,13 @@ void obsluga(void) // główna funkcja procesu obsługi
     int tasma_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        printf("Taśma - liczba niesprzedanych dań za %d zł: %d\n", CENY_DAN[i], tasma_dania_niesprzedane[i]);
+        LOGI("Taśma - liczba niesprzedanych dań za %d zł: %d\n", CENY_DAN[i], tasma_dania_niesprzedane[i]);
         tasma_suma += tasma_dania_niesprzedane[i] * CENY_DAN[i];
     }
-    printf("===Suma: %d zł===\n", tasma_suma);
+    LOGI("===Suma: %d zł===\n", tasma_suma);
 
-    printf("\n\nObsługa kończy pracę.\n");
-    printf("======================\n");
-    fflush(stdout);
+    LOGI("\n\nObsługa kończy pracę.\n");
+    LOGI("======================\n");
 
     *kolej_podsumowania = 2;
 

@@ -46,7 +46,7 @@ Każdy test uruchamia `./restauracja` w kontrolowany sposób (z limitami czasu) 
 
 Podsumowanie: wszystkie poniższe testy kończą się wynikiem **OK**.
 
-### `tests/test_smoke.sh` – test „dymny”
+### `tests/test_smoke.sh` – test bazowy
 
 - Cel: szybka weryfikacja, że projekt się buduje i uruchamia bez awarii.
 - Przebieg: `make clean && make`, następnie uruchomienie `./restauracja` z limitem czasu (ok. 3 s) i logowaniem do pliku.

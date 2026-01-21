@@ -91,8 +91,7 @@ void kierownik(void) // główna funkcja procesu kierownika
 
     czekaj_na_ture(3);
 
-    printf("Kierownik kończy pracę.\n");
-    fflush(stdout);
+    LOGI("Kierownik kończy pracę.\n");
     exit(0);
 }
 

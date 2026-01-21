@@ -15,14 +15,14 @@ static void obsluz_sigterm(int signo) // handler dla SIGTERM
 
 static void drukuj_podsumowanie_kuchni(void) // drukuje podsumowanie kuchni
 {
-    printf("\n=== PODSUMOWANIE KUCHNI ===\n");
+    LOGI("\n=== PODSUMOWANIE KUCHNI ===\n");
     int kuchnia_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        printf("Kuchnia - liczba wydanych dań za %d zł: %d\n", CENY_DAN[i], kuchnia_dania_wydane[i]);
+        LOGI("Kuchnia - liczba wydanych dań za %d zł: %d\n", CENY_DAN[i], kuchnia_dania_wydane[i]);
         kuchnia_suma += kuchnia_dania_wydane[i] * CENY_DAN[i];
     }
-    printf("\nSuma: %d zł\n", kuchnia_suma);
+    LOGI("\nSuma: %d zł\n", kuchnia_suma);
 }
 
 void kucharz(void) // główna funkcja procesu kucharza
@@ -37,9 +37,8 @@ void kucharz(void) // główna funkcja procesu kucharza
 
     drukuj_podsumowanie_kuchni();
 
-    printf("Kucharz kończy pracę.\n");
-    printf("======================\n");
-    fflush(stdout);
+    LOGI("Kucharz kończy pracę.\n");
+    LOGI("======================\n");
 
     *kolej_podsumowania = 3;
 
