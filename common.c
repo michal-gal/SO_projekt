@@ -198,9 +198,10 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
     pid_kierownik_shm = pid_obsluga_shm + 1;             // wskaźnik na PID procesu kierownika w pamięci współdzielonej
 
-    sem_id = semget(IPC_PRIVATE, 2, IPC_CREAT | 0600); // utwórz semafory
+    sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0600); // utwórz semafory
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);            // semafor do ochrony dostępu do stolików
     semctl(sem_id, SEM_TASMA, SETVAL, 1);              // semafor do ochrony dostępu do taśmy
+    semctl(sem_id, SEM_KOLEJKA, SETVAL, MAX_KOLEJKA_MSG); // semafor-limit pojemności kolejki komunikatów
 
     msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (msgq_id < 0)
@@ -249,13 +250,19 @@ void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
 
     for (;;)
     {
+        // Najpierw zarezerwuj miejsce w kolejce (ograniczenie liczby komunikatów).
+        sem_operacja(SEM_KOLEJKA, -1);
+
         if (msgsnd(msgq_id, &msg, sizeof(msg.grupa), IPC_NOWAIT) == 0)
             return;
+
+        // Nie wysłano komunikatu, więc zwolnij zarezerwowany slot.
+        sem_operacja(SEM_KOLEJKA, 1);
 
         if (errno == EINTR)
             continue;
         if (errno == EAGAIN)
-            return; // kolejka pełna - drop
+            continue; // kolejka pełna (mimo semafora) - spróbuj ponownie
         if (errno == EIDRM || errno == EINVAL)
             exit(0);
 
@@ -272,7 +279,11 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
     {
         ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
         if (r >= 0)
+        {
+            // Zwalniamy miejsce w kolejce dopiero po zdjęciu komunikatu.
+            sem_operacja(SEM_KOLEJKA, 1);
             return msg.grupa;
+        }
 
         if (errno == EINTR)
             continue;
@@ -327,5 +338,8 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         {
             (void)kill(pid, SIGTERM);
         }
+
+        // Zdjęliśmy komunikat z kolejki, więc zwalniamy slot semafora.
+        sem_operacja(SEM_KOLEJKA, 1);
     }
 }

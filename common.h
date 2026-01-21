@@ -68,6 +68,11 @@ extern pid_t *pid_kierownik_shm;
 
 #define SEM_STOLIKI 0
 #define SEM_TASMA 1
+#define SEM_KOLEJKA 2
+
+// Maksymalna liczba komunikatów w kolejce wejściowej (ograniczana semaforem),
+// żeby nie doprowadzić do przepełnienia kolejki System V przy dużej liczbie klientów.
+#define MAX_KOLEJKA_MSG 128
 
 struct Grupa // struktura reprezentująca grupę klientów
 {
