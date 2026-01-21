@@ -29,7 +29,7 @@ pid_t *pid_kierownik_shm; // wskaźnik na PID procesu kierownika w pamięci wsp�
 const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
 const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań
 
-void zainicjuj_losowosc(void)
+void zainicjuj_losowosc(void) // inicjalizuje generator liczb losowych
 {
     log_init_from_env();
     const char *seed_env = getenv("RESTAURACJA_SEED");
@@ -70,7 +70,7 @@ int cena_na_indeks(int cena)
 }
 
 // ====== PARSOWANIE ======
-int parsuj_int_lub_zakoncz(const char *what, const char *s)
+int parsuj_int_lub_zakoncz(const char *what, const char *s) // parsuje int z napisu lub kończy proces przy błędzie
 {
     errno = 0;
     char *end = NULL;
@@ -84,7 +84,7 @@ int parsuj_int_lub_zakoncz(const char *what, const char *s)
 }
 
 // ====== SYNCHRONIZACJA ======
-void czekaj_na_ture(int turn)
+void czekaj_na_ture(int turn) // czeka na turę wskazaną przez wartość 'turn'
 {
     while (*kolej_podsumowania != turn)
     {
@@ -96,7 +96,7 @@ void czekaj_na_ture(int turn)
 }
 
 // ====== STOLIKI ======
-int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g)
+int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g) // znajduje odpowiedni stolik dla grupy (zakłada, że semafor stolików jest zablokowany)
 {
     for (int i = 0; i < MAX_STOLIKI; i++)
     {
@@ -109,7 +109,7 @@ int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g)
     return -1;
 }
 
-void generator_stolikow(struct Stolik *stoliki_local)
+void generator_stolikow(struct Stolik *stoliki_local) // generuje stoliki w restauracji
 {
     int idx = 0;
     for (int i = 0; i < 4; i++)
@@ -135,7 +135,7 @@ void generator_stolikow(struct Stolik *stoliki_local)
 }
 
 // ====== TASMA ======
-void dodaj_danie(struct Talerzyk *tasma_local, int cena)
+void dodaj_danie(struct Talerzyk *tasma_local, int cena) // dodaje danie na taśmę
 {
     do
     {
@@ -172,7 +172,7 @@ void sem_operacja(int sem, int val) // zrobienie operacji na semaforze
     }
 }
 
-void stworz_ipc(void)
+void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory)
 {
     int bufor_size = sizeof(struct Stolik) * MAX_STOLIKI + // pamięć na stoliki
                      sizeof(struct Talerzyk) * MAX_TASMA + // pamięć na taśmę
@@ -210,7 +210,7 @@ void stworz_ipc(void)
     }
 }
 
-void dolacz_ipc(int shm_id_existing, int sem_id_existing)
+void dolacz_ipc(int shm_id_existing, int sem_id_existing) // dołącza do istniejących zasobów IPC po exec()
 {
     shm_id = shm_id_existing; // dołącz istniejącą pamięć współdzieloną
     sem_id = sem_id_existing; // dołącz istniejące semafory

@@ -26,7 +26,7 @@ static void obsluz_sygnal(int signo)
     }
 }
 
-static void obsluga_podaj_dania(double wydajnosc)
+static void obsluga_podaj_dania(double wydajnosc) // podaje dania na taśmę
 {
     int serves = (int)wydajnosc;
     for (int iter = 0; iter < serves; iter++)
@@ -102,13 +102,13 @@ static void obsluga_podaj_dania(double wydajnosc)
     }
 }
 
-void obsluga(void)
+void obsluga(void) // główna funkcja procesu obsługi
 {
     if (pid_obsluga_shm)
         *pid_obsluga_shm = getpid();
 
     zainicjuj_losowosc();
-
+    // Ustaw handlery sygnałów
     if (signal(SIGUSR1, obsluz_sygnal) == SIG_ERR)
         LOGE_ERRNO("signal(SIGUSR1)");
     if (signal(SIGUSR2, obsluz_sygnal) == SIG_ERR)
@@ -140,6 +140,7 @@ void obsluga(void)
 
         double wydajnosc = (double)biezaca_wydajnosc;
 
+        // Obsłuż grupy w kolejce
         struct Grupa g = kolejka_pobierz();
         if (g.proces_id != 0)
         {
@@ -151,7 +152,7 @@ void obsluga(void)
             pid_t log_pid = g.proces_id;
 
             sem_operacja(SEM_STOLIKI, -1);
-            stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(&g);
+            stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(&g); // znajdź stolik
             if (stolik_idx >= 0)
             {
                 stoliki[stolik_idx].grupy[stoliki[stolik_idx].liczba_grup] = g;
@@ -220,7 +221,7 @@ void obsluga(void)
     exit(0);
 }
 
-int main(int argc, char **argv)
+int main(int argc, char **argv) // punkt wejścia procesu obsługi
 {
     if (argc != 4)
     {

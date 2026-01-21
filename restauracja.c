@@ -85,7 +85,7 @@ static pid_t uruchom_potomka_exec(const char *file, const char *argv0) // urucha
     if (pid < 0)
     {
         LOGE_ERRNO("fork");
-        _exit(1);
+        return -1;
     }
     return pid;
 }
@@ -134,6 +134,12 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
 static void generator_utworz_jedna_grupe(void) // tworzy jedną grupę klientów
 {
     pid_t pid = uruchom_potomka_exec("./klient", "klient");
+    if (pid < 0)
+    {
+        if (restauracja_otwarta)
+            *restauracja_otwarta = 0;
+        return;
+    }
     if (children_pgid > 0)
         (void)setpgid(pid, children_pgid);
 }
@@ -167,6 +173,8 @@ int main(void)
     *kolej_podsumowania = 1;  // ustaw kolej na obsługę
 
     pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga"); // uruchom proces obsługa
+    if (pid_obsluga < 0)
+        goto awaryjne_zamkniecie;
     *pid_obsluga_shm = pid_obsluga;
 
     // Ustal grupę procesów dla wszystkich potomkow.
@@ -181,10 +189,14 @@ int main(void)
     signal(SIGCONT, restauracja_on_sigcont); // handler dla SIGCONT
 
     pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz"); // uruchom proces kucharz
+    if (pid_kucharz < 0)
+        goto awaryjne_zamkniecie;
     if (children_pgid > 0)
         (void)setpgid(pid_kucharz, children_pgid);
 
     pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik"); // uruchom proces kierownik
+    if (pid_kierownik < 0)
+        goto awaryjne_zamkniecie;
     *pid_kierownik_shm = pid_kierownik;
     if (children_pgid > 0)
         (void)setpgid(pid_kierownik, children_pgid);
@@ -243,4 +255,31 @@ int main(void)
 
     printf("Program zakończony.\n");
     return 0;
+
+awaryjne_zamkniecie:
+    // Błąd fork() nie powinien zostawiać osieroconych procesów/IPC.
+    if (restauracja_otwarta)
+        *restauracja_otwarta = 0;
+    if (kolej_podsumowania)
+        *kolej_podsumowania = 1;
+
+    printf("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
+    fflush(stdout);
+
+    // Jeśli cokolwiek już wystartowało (dzieci w grupie), zakończ je.
+    {
+        int status;
+        zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
+        zakoncz_wszystkie_dzieci(&status);
+    }
+
+    if (shm_id >= 0)
+        shmctl(shm_id, IPC_RMID, NULL);
+    if (sem_id >= 0)
+        semctl(sem_id, 0, IPC_RMID);
+    if (msgq_id >= 0)
+        msgctl(msgq_id, IPC_RMID, NULL);
+
+    fprintf(stderr, "Awaryjne zamknięcie: nie udało się utworzyć procesu (fork).\n");
+    return 1;
 }

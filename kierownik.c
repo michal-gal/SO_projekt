@@ -55,7 +55,7 @@ static void kierownik_wyslij_sygnal(void) // kierownik wysyła sygnał do obsłu
         }
         LOGI("Kierownik wysyła SIGUSR2 do obsługi (PID %d)\n", pid_obsl);
     }
-    else if (v == 3) // 2% szans na SIGTERM (zamknięcie restauracji)
+    else if (v == 3) // 2% szans na zamknięcie restauracji przez kierownika
     {
         if (!disable_close)
         {

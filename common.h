@@ -8,7 +8,7 @@
 #include <time.h>      // time_t
 #include <unistd.h>    // sleep
 
-static inline unsigned rest_sleep(unsigned seconds)
+static inline unsigned rest_sleep(unsigned seconds) // sleep z możliwością wyłączenia w testach
 {
 #ifdef TEST_NO_SLEEP
     (void)seconds;
@@ -18,7 +18,7 @@ static inline unsigned rest_sleep(unsigned seconds)
 #endif
 }
 
-static inline int rest_nanosleep(const struct timespec *req, struct timespec *rem)
+static inline int rest_nanosleep(const struct timespec *req, struct timespec *rem) // nanosleep z możliwością wyłączenia w testach
 {
 #ifdef TEST_NO_SLEEP
     (void)req;
@@ -69,7 +69,7 @@ extern pid_t *pid_kierownik_shm;
 #define SEM_STOLIKI 0
 #define SEM_TASMA 1
 
-struct Grupa
+struct Grupa // struktura reprezentująca grupę klientów
 {
     pid_t proces_id;         // PID procesu grupy
     int osoby;               // liczba osób w grupie
@@ -82,7 +82,7 @@ struct Grupa
     int danie_specjalne;  // jeśli zamówiono danie specjalne to jest cena dania, 0 jeśli nie
 };
 
-struct Stolik
+struct Stolik // struktura reprezentująca stolik
 {
     int numer_stolika;
     int pojemnosc;
@@ -91,7 +91,7 @@ struct Stolik
     int zajete_miejsca;                      // liczba osób przy stoliku
 };
 
-struct Talerzyk
+struct Talerzyk // struktura reprezentująca danie na taśmie
 {
     int cena;
     int stolik_specjalny; // 0 = normalne danie, >0 = numer stolika dla zamówienia specjalnego
