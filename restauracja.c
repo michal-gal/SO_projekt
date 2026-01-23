@@ -25,8 +25,8 @@ static volatile sig_atomic_t shutdown_signal = 0;  // który sygnał spowodował
 
 static void zamknij_odziedziczone_fd_przed_exec(void)
 {
-    // Po uruchomieniu z VS Code/terminala proces może dziedziczyć dodatkowe FD (sockety/inotify/ptyhost itd.).
-    // Dla prostoty i przewidywalności zamykamy wszystko poza stdin/stdout/stderr.
+    // Po uruchomieniu proces może dziedziczyć dodatkowe FD
+    // zamykamy wszystko poza stdin/stdout/stderr.
     long max_fd = sysconf(_SC_OPEN_MAX);
     if (max_fd <= 0)
         max_fd = 1024;
@@ -35,7 +35,7 @@ static void zamknij_odziedziczone_fd_przed_exec(void)
         (void)close(fd);
 }
 
-static const char *nazwa_sygnalu(int signo)
+static const char *nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstawie jego numeru
 {
     switch (signo)
     {

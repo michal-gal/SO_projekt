@@ -80,6 +80,7 @@ Podsumowanie: wszystkie poniższe testy kończą się wynikiem **OK**.
 - Przebieg: kompilacja z `EXTRA_CFLAGS='-DTEST_NO_SLEEP'`, uruchomienie z krótkim czasem pracy (`RESTAURACJA_CZAS_PRACY`) oraz zablokowanym losowym zamknięciem przez kierownika (`RESTAURACJA_DISABLE_MANAGER_CLOSE=1`).
 - Kryterium zaliczenia: program kończy się sam w zadanym czasie i tworzy niepusty log.
 - Wynik: **OK**.
+- Uwagi: nie tworzą się procesy klientów.
 
 ## Linki do istotnych fragmentów kodu (GitHub)
 
