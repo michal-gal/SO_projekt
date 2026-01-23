@@ -1,6 +1,7 @@
 #include "log.h"
 
 #include <fcntl.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +65,20 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
         (void)setenv("RESTAURACJA_LOG_FILE", path, 0);
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    int flags = O_WRONLY | O_CREAT | O_APPEND;
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+    int fd = open(path, flags, 0644);
+    if (fd >= 0)
+    {
+#ifndef O_CLOEXEC
+        // Best-effort fallback: ensure the FD is closed on exec() to avoid leaking it to children.
+        int old_flags = fcntl(fd, F_GETFD);
+        if (old_flags != -1)
+            (void)fcntl(fd, F_SETFD, old_flags | FD_CLOEXEC);
+#endif
+    }
     if (fd >= 0)
     {
         log_fd = fd;

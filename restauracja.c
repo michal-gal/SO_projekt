@@ -23,6 +23,18 @@ static pid_t children_pgid = -1;
 static volatile sig_atomic_t sigint_requested = 0; // czy został otrzymany SIGINT/SIGQUIT
 static volatile sig_atomic_t shutdown_signal = 0;  // który sygnał spowodował zamknięcie
 
+static void zamknij_odziedziczone_fd_przed_exec(void)
+{
+    // Po uruchomieniu z VS Code/terminala proces może dziedziczyć dodatkowe FD (sockety/inotify/ptyhost itd.).
+    // Dla prostoty i przewidywalności zamykamy wszystko poza stdin/stdout/stderr.
+    long max_fd = sysconf(_SC_OPEN_MAX);
+    if (max_fd <= 0)
+        max_fd = 1024;
+
+    for (int fd = 3; fd < (int)max_fd; fd++)
+        (void)close(fd);
+}
+
 static const char *nazwa_sygnalu(int signo)
 {
     switch (signo)
@@ -78,6 +90,7 @@ static pid_t uruchom_potomka_exec(const char *file, const char *argv0) // urucha
     pid_t pid = fork();
     if (pid == 0)
     {
+        zamknij_odziedziczone_fd_przed_exec();
         execl(file, argv0, arg_shm, arg_sem, arg_msgq, (char *)NULL);
         LOGE_ERRNO("execl");
         _exit(127);
@@ -144,6 +157,34 @@ static void generator_utworz_jedna_grupe(void) // tworzy jedną grupę klientów
         (void)setpgid(pid, children_pgid);
 }
 
+static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
+{
+    // Błąd fork() nie powinien zostawiać osieroconych procesów/IPC.
+    if (restauracja_otwarta)
+        *restauracja_otwarta = 0;
+    if (kolej_podsumowania)
+        *kolej_podsumowania = 1;
+
+    LOGS("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
+
+    // Jeśli cokolwiek już wystartowało (dzieci w grupie), zakończ je.
+    {
+        int status;
+        zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
+        zakoncz_wszystkie_dzieci(&status);
+    }
+
+    if (shm_id >= 0)
+        shmctl(shm_id, IPC_RMID, NULL);
+    if (sem_id >= 0)
+        semctl(sem_id, 0, IPC_RMID);
+    if (msgq_id >= 0)
+        msgctl(msgq_id, IPC_RMID, NULL);
+
+    fprintf(stderr, "Awaryjne zamknięcie: nie udało się utworzyć procesu (fork).\n");
+    return 1;
+}
+
 // ====== MAIN ======
 int main(void)
 {
@@ -174,7 +215,7 @@ int main(void)
 
     pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga"); // uruchom proces obsługa
     if (pid_obsluga < 0)
-        goto awaryjne_zamkniecie;
+        return awaryjne_zamkniecie_fork();
     *pid_obsluga_shm = pid_obsluga;
 
     // Ustal grupę procesów dla wszystkich potomkow.
@@ -190,13 +231,13 @@ int main(void)
 
     pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz"); // uruchom proces kucharz
     if (pid_kucharz < 0)
-        goto awaryjne_zamkniecie;
+        return awaryjne_zamkniecie_fork();
     if (children_pgid > 0)
         (void)setpgid(pid_kucharz, children_pgid);
 
     pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik"); // uruchom proces kierownik
     if (pid_kierownik < 0)
-        goto awaryjne_zamkniecie;
+        return awaryjne_zamkniecie_fork();
     *pid_kierownik_shm = pid_kierownik;
     if (children_pgid > 0)
         (void)setpgid(pid_kierownik, children_pgid);
@@ -254,30 +295,4 @@ int main(void)
 
     LOGS("Program zakończony.\n");
     return 0;
-
-awaryjne_zamkniecie:
-    // Błąd fork() nie powinien zostawiać osieroconych procesów/IPC.
-    if (restauracja_otwarta)
-        *restauracja_otwarta = 0;
-    if (kolej_podsumowania)
-        *kolej_podsumowania = 1;
-
-    LOGS("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
-
-    // Jeśli cokolwiek już wystartowało (dzieci w grupie), zakończ je.
-    {
-        int status;
-        zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
-        zakoncz_wszystkie_dzieci(&status);
-    }
-
-    if (shm_id >= 0)
-        shmctl(shm_id, IPC_RMID, NULL);
-    if (sem_id >= 0)
-        semctl(sem_id, 0, IPC_RMID);
-    if (msgq_id >= 0)
-        msgctl(msgq_id, IPC_RMID, NULL);
-
-    fprintf(stderr, "Awaryjne zamknięcie: nie udało się utworzyć procesu (fork).\n");
-    return 1;
 }
