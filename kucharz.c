@@ -1,9 +1,9 @@
 #include "common.h"
 
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 static volatile sig_atomic_t shutdown_requested = 0; // czy został otrzymany SIGTERM
 
@@ -30,10 +30,17 @@ void kucharz(void) // główna funkcja procesu kucharza
     if (signal(SIGTERM, obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
 
-    while (*restauracja_otwarta && !shutdown_requested)
-        rest_sleep(1);
+    ustaw_shutdown_flag(&shutdown_requested);
 
-    czekaj_na_ture(2);
+    /* Wait for restaurant opening signalled via SEM_TURA instead of busy-waiting.
+       The parent sets `*kolej_podsumowania` and calls `sygnalizuj_ture()`
+       when the restaurant opens, so consume that semaphore token here. */
+    LOGI("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
+    sem_operacja(SEM_TURA, -1);
+    LOGI("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
+
+    /* After being started, wait for the summary turn (2) or shutdown. */
+    czekaj_na_ture(2, &shutdown_requested);
 
     drukuj_podsumowanie_kuchni();
 
@@ -41,6 +48,7 @@ void kucharz(void) // główna funkcja procesu kucharza
     LOGS("======================\n");
 
     *kolej_podsumowania = 3;
+    sygnalizuj_ture();
 
     exit(0);
 }

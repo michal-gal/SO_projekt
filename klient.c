@@ -1,5 +1,8 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "common.h"
 
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +16,11 @@ static void klient_obsluz_sigterm(int signo)
 {
     (void)signo;
     prosba_zamkniecia = 1;
+}
+
+static void klient_obsluz_sigusr1(int signo)
+{
+    (void)signo;
 }
 
 static struct Grupa inicjalizuj_grupe(void)
@@ -65,6 +73,15 @@ static void usadz_grupe_vip(struct Grupa *g)
 
 static int czekaj_na_przydzial_stolika(struct Grupa *g)
 {
+    pid_t moj_proces_id = g->proces_id;
+    sigset_t block_set, old_set;
+    sigemptyset(&block_set);
+    sigaddset(&block_set, SIGUSR1);
+    /* Block SIGUSR1 before adding to the queue to avoid a race where
+      the manager/obsługa sends SIGUSR1 between enqueue and blocking,
+      which could cause the client to miss the wakeup. */
+    sigprocmask(SIG_BLOCK, &block_set, &old_set);
+
     kolejka_dodaj(*g);
     LOGI("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
          g->proces_id,
@@ -73,7 +90,6 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
          g->dzieci,
          g->vip ? " [VIP]" : "");
 
-    pid_t moj_proces_id = g->proces_id;
     while (g->stolik_przydzielony == -1 && *restauracja_otwarta && !prosba_zamkniecia)
     {
         int log_znaleziono = 0;
@@ -98,8 +114,14 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
 
         if (log_znaleziono)
             LOGI("Grupa %d znalazała swój stolik: %d\n", g->proces_id, log_numer_stolika);
-        rest_sleep(1);
+
+        if (g->stolik_przydzielony == -1 && *restauracja_otwarta && !prosba_zamkniecia)
+        {
+            sigsuspend(&old_set);
+        }
     }
+
+    sigprocmask(SIG_SETMASK, &old_set, NULL);
 
     if (g->stolik_przydzielony == -1)
     {
@@ -272,11 +294,11 @@ static void petla_czekania_na_dania(struct Grupa *g)
         WynikPobraniaDania wynik = sprobuj_pobrac_danie(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
         if (wynik == POBRANIE_POMINIETO_INNY_STOLIK)
         {
-            rest_sleep(1);
+            sched_yield();
             continue;
         }
 
-        rest_sleep(1);
+        sched_yield();
     }
 }
 
@@ -284,6 +306,10 @@ void klient(void)
 {
     if (signal(SIGTERM, klient_obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
+
+    ustaw_shutdown_flag(&prosba_zamkniecia);
+    if (signal(SIGUSR1, klient_obsluz_sigusr1) == SIG_ERR)
+        LOGE_ERRNO("signal(SIGUSR1)");
 
     struct Grupa g = inicjalizuj_grupe();
 

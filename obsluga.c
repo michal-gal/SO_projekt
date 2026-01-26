@@ -1,9 +1,9 @@
 #include "common.h"
 
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 static volatile sig_atomic_t obsluga_wydajnosc = 2; // 1=wolno, 2=normalnie, 4=szybko
 static volatile sig_atomic_t shutdown_requested = 0;
@@ -116,13 +116,14 @@ void obsluga(void) // główna funkcja procesu obsługi
     if (signal(SIGTERM, obsluz_sygnal) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
 
+    ustaw_shutdown_flag(&shutdown_requested);
+
     sig_atomic_t ostatnia_wydajnosc = obsluga_wydajnosc;
 
     while (*restauracja_otwarta)
     {
         if (shutdown_requested)
         {
-            *restauracja_otwarta = 0;
             break;
         }
 
@@ -142,6 +143,7 @@ void obsluga(void) // główna funkcja procesu obsługi
 
         // Obsłuż grupy w kolejce
         struct Grupa g = kolejka_pobierz();
+        LOGI("obsluga: pid=%d kolejka_pobierz returned pid=%d\n", (int)getpid(), g.proces_id);
         if (g.proces_id != 0)
         {
             int stolik_idx = -1;
@@ -172,16 +174,19 @@ void obsluga(void) // główna funkcja procesu obsługi
                      log_zajete,
                      log_pojemnosc);
 
+            if (log_usadzono && log_pid > 0)
+                (void)kill(log_pid, SIGUSR1);
+
             if (stolik_idx < 0 && *restauracja_otwarta)
                 kolejka_dodaj(g);
         }
 
         obsluga_podaj_dania(wydajnosc);
-        rest_sleep(1);
+        sched_yield();
     }
 
     // Czekaj na zakończenie obsługi wszystkich grup
-    czekaj_na_ture(1);
+    czekaj_na_ture(1, &shutdown_requested);
 
     // Podsumowanie
     LOGS("\n=== PODSUMOWANIE KASY ===\n");
@@ -216,6 +221,7 @@ void obsluga(void) // główna funkcja procesu obsługi
     LOGS("======================\n");
 
     *kolej_podsumowania = 2;
+    sygnalizuj_ture();
 
     exit(0);
 }

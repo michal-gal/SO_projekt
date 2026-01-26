@@ -3,6 +3,7 @@
 
 #include "log.h"
 
+#include <signal.h>    // sig_atomic_t
 #include <stdio.h>     // printf
 #include <sys/types.h> // pid_t
 #include <time.h>      // time_t
@@ -69,10 +70,19 @@ extern pid_t *pid_kierownik_shm;
 #define SEM_STOLIKI 0
 #define SEM_TASMA 1
 #define SEM_KOLEJKA 2
+#define SEM_TURA 3
+// Dodatkowy semafor informujący o liczbie wiadomości w kolejce
+#define SEM_MSGS 4
+// Semafor wybudzający kierownika do okresowych działań
+#define SEM_KIEROWNIK 5
 
 // Maksymalna liczba komunikatów w kolejce wejściowej (ograniczana semaforem),
 // żeby nie doprowadzić do przepełnienia kolejki System V przy dużej liczbie klientów.
+// Dodatkowo rezerwujemy kilka slotów, aby kolejka nigdy nie była całkowicie
+// zapełniona — to pozwala na operacje "cofnij do kolejki" lub inne priorytetowe
+// wpisy administracyjne.
 #define MAX_KOLEJKA_MSG 128
+#define KOLEJKA_REZERWA 1 // ile slotów rezerwujemy (domyślnie 1)
 
 struct Grupa // struktura reprezentująca grupę klientów
 {
@@ -110,6 +120,12 @@ struct Talerzyk // struktura reprezentująca danie na taśmie
  * @param val - wartość operacji
  */
 void sem_operacja(int sem, int val);
+
+/**
+ * Ustawia wskaźnik na flagę shutdown, aby sem_operacja mogła przerwać
+ * oczekiwanie po sygnale (EINTR) i zakończyć proces.
+ */
+void ustaw_shutdown_flag(volatile sig_atomic_t *flag);
 
 /**
  * Dodaje grupę do kolejki.
@@ -175,7 +191,12 @@ int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g);
 /**
  * Czeka na turę wskazaną przez wartość 'turn'.
  */
-void czekaj_na_ture(int turn);
+void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown);
+
+/**
+ * Sygnalizuje zmianę tury podsumowania.
+ */
+void sygnalizuj_ture(void);
 
 /**
  * Parsuje int z napisu lub kończy proces przy błędzie.

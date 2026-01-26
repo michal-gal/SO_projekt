@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "common.h"
 
 #include <errno.h>
@@ -84,15 +85,26 @@ int parsuj_int_lub_zakoncz(const char *what, const char *s) // parsuje int z nap
 }
 
 // ====== SYNCHRONIZACJA ======
-void czekaj_na_ture(int turn) // czeka na turę wskazaną przez wartość 'turn'
+static volatile sig_atomic_t *shutdown_flag_ptr = NULL;
+
+void ustaw_shutdown_flag(volatile sig_atomic_t *flag)
 {
-    while (*kolej_podsumowania != turn)
+    shutdown_flag_ptr = flag;
+}
+
+void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown) // czeka na turę wskazaną przez wartość 'turn'
+{
+    LOGI("czekaj_na_ture: pid=%d waiting for turn=%d\n", (int)getpid(), turn);
+    while (*kolej_podsumowania != turn && !*shutdown)
     {
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 50L * 1000L * 1000L; // 50ms
-        rest_nanosleep(&ts, NULL);
+        sem_operacja(SEM_TURA, -1);
     }
+    LOGI("czekaj_na_ture: pid=%d done waiting for turn=%d current=%d\n", (int)getpid(), turn, *kolej_podsumowania);
+}
+
+void sygnalizuj_ture(void) // sygnalizuje zmianę tury podsumowania
+{
+    sem_operacja(SEM_TURA, 1);
 }
 
 // ====== STOLIKI ======
@@ -159,11 +171,22 @@ void sem_operacja(int sem, int val) // zrobienie operacji na semaforze
     struct sembuf sb = {sem, val, SEM_UNDO}; // SEM_UNDO aby uniknąć deadlocka przy nagłym zakończeniu procesu
     for (;;)
     {
+        LOGI("sem_operacja: pid=%d sem=%d val=%d\n", (int)getpid(), sem, val);
         if (semop(sem_id, &sb, 1) == 0) // operacja zakończona sukcesem
+        {
+            LOGI("sem_operacja: pid=%d sem=%d val=%d done\n", (int)getpid(), sem, val);
             return;
+        }
 
         if (errno == EINTR) // przerwane przez sygnał
+        {
+            if (shutdown_flag_ptr && *shutdown_flag_ptr)
+            {
+                LOGI("sem_operacja: pid=%d interrupted by signal during shutdown, exiting\n", (int)getpid());
+                exit(0);
+            }
             continue;
+        }
 
         if (errno == EIDRM || errno == EINVAL) // zasób IPC usunięty lub nieprawidłowy
             exit(0);
@@ -198,10 +221,15 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
     pid_kierownik_shm = pid_obsluga_shm + 1;             // wskaźnik na PID procesu kierownika w pamięci współdzielonej
 
-    sem_id = semget(IPC_PRIVATE, 3, IPC_CREAT | 0600);    // utwórz semafory
+    sem_id = semget(IPC_PRIVATE, 6, IPC_CREAT | 0600);    // utwórz semafory (dodatkowy do licznika wiadomości i kierownika)
     semctl(sem_id, SEM_STOLIKI, SETVAL, 1);               // semafor do ochrony dostępu do stolików
     semctl(sem_id, SEM_TASMA, SETVAL, 1);                 // semafor do ochrony dostępu do taśmy
-    semctl(sem_id, SEM_KOLEJKA, SETVAL, MAX_KOLEJKA_MSG); // semafor-limit pojemności kolejki komunikatów
+    // Ustawiamy limit pojemności kolejki, ale rezerwujemy kilka slotów
+    // (KOLEJKA_REZERWA) aby kolejka nigdy nie była całkowicie zapełniona.
+    semctl(sem_id, SEM_KOLEJKA, SETVAL, MAX_KOLEJKA_MSG - KOLEJKA_REZERWA); // semafor-limit pojemności kolejki komunikatów
+    semctl(sem_id, SEM_TURA, SETVAL, 0);                  // semafor sygnalizujący zmianę tury
+    semctl(sem_id, SEM_MSGS, SETVAL, 0);                  // liczba wiadomości w kolejce (prod/cons)
+    semctl(sem_id, SEM_KIEROWNIK, SETVAL, 0);             // semafor wybudzający kierownika
 
     msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (msgq_id < 0)
@@ -250,11 +278,39 @@ void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
 
     for (;;)
     {
-        // Najpierw zarezerwuj miejsce w kolejce (ograniczenie liczby komunikatów).
-        sem_operacja(SEM_KOLEJKA, -1);
-
-        if (msgsnd(msgq_id, &msg, sizeof(msg.grupa), IPC_NOWAIT) == 0)
+        if (!*restauracja_otwarta)
             return;
+
+        // Najpierw zarezerwuj miejsce w kolejce (ograniczenie liczby komunikatów).
+        // Używamy semtimedop, aby okresowo sprawdzać flagę zamknięcia.
+        struct sembuf sb = {SEM_KOLEJKA, -1, SEM_UNDO};
+        struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
+        if (semtimedop(sem_id, &sb, 1, &ts) != 0)
+        {
+            if (errno == EINTR)
+            {
+                if (shutdown_flag_ptr && *shutdown_flag_ptr)
+                    exit(0);
+                continue;
+            }
+            if (errno == EAGAIN)
+            {
+                if (!*restauracja_otwarta)
+                    return;
+                continue;
+            }
+            if (errno == EIDRM || errno == EINVAL)
+                exit(0);
+            return;
+        }
+
+        if (msgsnd(msgq_id, &msg, sizeof(msg.grupa), 0) == 0)
+        {
+            /* Informujemy konsumentów, że jest nowa wiadomość. */
+            LOGI("kolejka_dodaj: pid=%d sent message pid=%d\n", (int)getpid(), msg.grupa.proces_id);
+            sem_operacja(SEM_MSGS, 1);
+            return;
+        }
 
         // Nie wysłano komunikatu, więc zwolnij zarezerwowany slot.
         sem_operacja(SEM_KOLEJKA, 1);
@@ -262,7 +318,7 @@ void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
         if (errno == EINTR)
             continue;
         if (errno == EAGAIN)
-            continue; // kolejka pełna (mimo semafora) - spróbuj ponownie
+            continue; // kolejka pełna - spróbuj ponownie
         if (errno == EIDRM || errno == EINVAL)
             exit(0);
 
@@ -274,21 +330,68 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
 {
     struct Grupa g = {0};
     QueueMsg msg;
-
+    /* Use non-blocking receive so we can react quickly to shutdown.
+       If no message is available, sleep briefly and retry. We still
+       release the slot semaphore after successful receive. */
+    /* Use a message-count semaphore to wait for messages without busy-polling.
+       We attempt a non-blocking decrement on SEM_MSGS; if it succeeds, a
+       message should be available and we retrieve it with non-blocking msgrcv.
+       If no message is available or the restaurant is closing, we return. */
+    /* Block on the message-count semaphore (wait for a producer). Using a
+        blocking semop lets consumers sleep here until a message is available
+        while still handling EINTR and shutdown cleanly. */
+    struct sembuf sb = {SEM_MSGS, -1, SEM_UNDO};
     for (;;)
     {
-        ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
-        if (r >= 0)
+        LOGI("kolejka_pobierz: pid=%d waiting SEM_MSGS\n", (int)getpid());
+        if (semop(sem_id, &sb, 1) == 0)
         {
-            // Zwalniamy miejsce w kolejce dopiero po zdjęciu komunikatu.
-            sem_operacja(SEM_KOLEJKA, 1);
-            return msg.grupa;
+            LOGI("kolejka_pobierz: pid=%d got SEM_MSGS\n", (int)getpid());
+            /* We reserved one message token; try to receive the message. */
+            ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
+            if (r >= 0)
+            {
+                /* Zwalniamy miejsce w kolejce dopiero po zdjęciu komunikatu. */
+                LOGI("kolejka_pobierz: pid=%d received message pid=%d\n", (int)getpid(), msg.grupa.proces_id);
+                sem_operacja(SEM_KOLEJKA, 1);
+                return msg.grupa;
+            }
+
+            /* If receive failed, restore the SEM_MSGS token and handle errors. */
+            LOGI("kolejka_pobierz: pid=%d msgrcv failed errno=%d\n", (int)getpid(), errno);
+            sem_operacja(SEM_MSGS, 1);
+
+            if (errno == EINTR)
+                continue;
+
+            if (errno == ENOMSG)
+                continue; /* unexpected, but retry */
+
+            if (errno == EIDRM || errno == EINVAL)
+                exit(0);
+
+            return g;
         }
 
         if (errno == EINTR)
+        {
+            /* Interrupted by signal — check if we should exit. */
+            if (!*restauracja_otwarta)
+                return g;
             continue;
-        if (errno == ENOMSG)
-            return g;
+        }
+
+        if (errno == EAGAIN)
+        {
+            /* No messages presently — if restaurant closed, return; otherwise sleep briefly. */
+            if (!*restauracja_otwarta)
+                return g;
+
+            struct timespec req = {.tv_sec = 0, .tv_nsec = 10 * 1000 * 1000}; // 10ms
+            (void)rest_nanosleep(&req, NULL);
+            continue;
+        }
+
         if (errno == EIDRM || errno == EINVAL)
             exit(0);
 
@@ -298,7 +401,10 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
 
 void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich klientów i czyści stan stolików i kolejki
 {
+    LOGI("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n", (int)getpid());
+
     // Klienci usadzeni przy stolikach.
+    LOGI("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d locking SEM_STOLIKI\n", (int)getpid());
     sem_operacja(SEM_STOLIKI, -1);
     for (int i = 0; i < MAX_STOLIKI; i++)
     {
@@ -307,6 +413,7 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
             pid_t pid = stoliki[i].grupy[j].proces_id;
             if (pid > 0)
             {
+                LOGI("zakoncz_klientow: pid=%d killing seated client pid=%d at stolik=%d\n", (int)getpid(), (int)pid, i + 1);
                 (void)kill(pid, SIGTERM);
             }
         }
@@ -318,6 +425,7 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
     sem_operacja(SEM_STOLIKI, 1);
 
     // Klienci w kolejce wejściowej.
+    LOGI("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n", (int)getpid());
     QueueMsg msg;
     for (;;)
     {
@@ -334,12 +442,16 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         }
 
         pid_t pid = msg.grupa.proces_id;
+        LOGI("zakoncz_klientow: pid=%d popped queued client pid=%d\n", (int)getpid(), (int)pid);
         if (pid > 0)
         {
+            LOGI("zakoncz_klientow: pid=%d killing queued client pid=%d\n", (int)getpid(), (int)pid);
             (void)kill(pid, SIGTERM);
         }
 
         // Zdjęliśmy komunikat z kolejki, więc zwalniamy slot semafora.
+        LOGI("zakoncz_klientow: pid=%d releasing SEM_KOLEJKA slot\n", (int)getpid());
         sem_operacja(SEM_KOLEJKA, 1);
     }
+    LOGI("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n", (int)getpid());
 }
