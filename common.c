@@ -221,15 +221,15 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     pid_obsluga_shm = (pid_t *)(kolej_podsumowania + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
     pid_kierownik_shm = pid_obsluga_shm + 1;             // wskaźnik na PID procesu kierownika w pamięci współdzielonej
 
-    sem_id = semget(IPC_PRIVATE, 6, IPC_CREAT | 0600);    // utwórz semafory (dodatkowy do licznika wiadomości i kierownika)
-    semctl(sem_id, SEM_STOLIKI, SETVAL, 1);               // semafor do ochrony dostępu do stolików
-    semctl(sem_id, SEM_TASMA, SETVAL, 1);                 // semafor do ochrony dostępu do taśmy
+    sem_id = semget(IPC_PRIVATE, 6, IPC_CREAT | 0600); // utwórz semafory (dodatkowy do licznika wiadomości i kierownika)
+    semctl(sem_id, SEM_STOLIKI, SETVAL, 1);            // semafor do ochrony dostępu do stolików
+    semctl(sem_id, SEM_TASMA, SETVAL, 1);              // semafor do ochrony dostępu do taśmy
     // Ustawiamy limit pojemności kolejki, ale rezerwujemy kilka slotów
     // (KOLEJKA_REZERWA) aby kolejka nigdy nie była całkowicie zapełniona.
     semctl(sem_id, SEM_KOLEJKA, SETVAL, MAX_KOLEJKA_MSG - KOLEJKA_REZERWA); // semafor-limit pojemności kolejki komunikatów
-    semctl(sem_id, SEM_TURA, SETVAL, 0);                  // semafor sygnalizujący zmianę tury
-    semctl(sem_id, SEM_MSGS, SETVAL, 0);                  // liczba wiadomości w kolejce (prod/cons)
-    semctl(sem_id, SEM_KIEROWNIK, SETVAL, 0);             // semafor wybudzający kierownika
+    semctl(sem_id, SEM_TURA, SETVAL, 0);                                    // semafor sygnalizujący zmianę tury
+    semctl(sem_id, SEM_MSGS, SETVAL, 0);                                    // liczba wiadomości w kolejce (prod/cons)
+    semctl(sem_id, SEM_KIEROWNIK, SETVAL, 0);                               // semafor wybudzający kierownika
 
     msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (msgq_id < 0)
