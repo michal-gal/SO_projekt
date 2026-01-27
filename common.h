@@ -1,40 +1,32 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+// ====== INKLUDY ======
 #include "log.h"
 
+#include <pthread.h>   // pthread_mutex_t, pthread_cond_t
 #include <signal.h>    // sig_atomic_t
 #include <stdio.h>     // printf
 #include <sys/types.h> // pid_t
 #include <time.h>      // time_t
 #include <unistd.h>    // sleep
 
-static inline unsigned rest_sleep(unsigned seconds) // sleep z możliwością wyłączenia w testach
+// ====== INLINE FUNKCJE ======
+static inline unsigned rest_sleep(unsigned seconds) // wrapper dla sleep()
 {
-#ifdef TEST_NO_SLEEP
-    (void)seconds;
-    return 0;
-#else
     return sleep(seconds);
-#endif
 }
 
-static inline int rest_nanosleep(const struct timespec *req, struct timespec *rem) // nanosleep z możliwością wyłączenia w testach
+static inline int rest_nanosleep(const struct timespec *req, struct timespec *rem) // wrapper dla nanosleep()
 {
-#ifdef TEST_NO_SLEEP
-    (void)req;
-    (void)rem;
-    return 0;
-#else
     return nanosleep(req, rem);
-#endif
 }
 
 // ====== STAŁE ======
-#define X1 5                                          // liczba stolików o pojemności 1
-#define X2 5                                          // liczba stolików o pojemności 2
-#define X3 5                                          // liczba stolików o pojemności 3
-#define X4 5                                          // liczba stolików o pojemności 4
+#define X1 10                                         // liczba stolików o pojemności 1
+#define X2 10                                         // liczba stolików o pojemności 2
+#define X3 10                                         // liczba stolików o pojemności 3
+#define X4 10                                         // liczba stolików o pojemności 4
 #define p10 10                                        // ceny dań 1
 #define p15 15                                        // ceny dań 2
 #define p20 20                                        // ceny dań 3
@@ -43,38 +35,44 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 #define p60 60                                        // ceny dań 6
 #define MAX_OSOBY (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4) // maksymalna liczba osób przy stolikach
 #define MAX_STOLIKI (X1 + X2 + X3 + X4)               // maksymalna liczba stolików
-#define MAX_TASMA 100                                 // maksymalna długość taśmy
+#define MAX_TASMA 150                                 // maksymalna długość taśmy
 #define MAX_GRUP_NA_STOLIKU 4                         // maksymalna liczba grup na jednym stoliku
 #define TP 10                                         // godzina otwarcia restauracji
 #define TK 22                                         // godzina zamknięcia restauracji
 #define CZAS_PRACY (TK - TP) * 5                      // czas otwarcia restauracji w sekundach
 #define REZERWA_TASMA 50
-#define LADA (MAX_TASMA - MAX_OSOBY - REZERWA_TASMA)
+#define REZERWA_STOLIKI 5
+#define REZERWA_KOLEJKA 5
+#define MAX_LOSOWYCH_GRUP 5000 // maksymalna liczba losowych grup do wygenerowania
 
 // ====== ZMIENNE GLOBALNE ======
-extern int shm_id, sem_id;          // ID pamięci współdzielonej i semaforów
-extern int msgq_id;                 // ID kolejki komunikatów (System V)
-extern struct Stolik *stoliki;      // wskaźnik na tablicę stolików
-extern int *restauracja_otwarta;    // wskaźnik na stan restauracji
-extern int *kuchnia_dania_wydane;   // liczba wydanych dań przez kuchnię
-extern int *kasa_dania_sprzedane;   // liczba sprzedanych dań przez kasę
-extern struct Talerzyk *tasma;      // tablica reprezentująca taśmę
-extern int *kolej_podsumowania;     // czyja kolej na podsumowanie (1=obsługa, 2=kucharz, 3=kierownik)
-extern const int ILOSC_STOLIKOW[4]; // liczba stolików o pojemności 1,2,3,4
-extern const int CENY_DAN[6];       // ceny dań
+extern int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
+extern int msgq_id;               // ID kolejki komunikatów (System V)
+extern struct Stolik *stoliki;    // wskaźnik na tablicę stolików
+extern int *restauracja_otwarta;  // wskaźnik na stan restauracji
+extern int *kuchnia_dania_wydane; // liczba wydanych dań przez kuchnię
+extern int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
+extern struct Talerzyk *tasma;    // tablica reprezentująca taśmę
+struct TasmaSync;
+extern struct TasmaSync *tasma_sync;     // synchronizacja taśmy (mutex/cond + licznik)
+extern struct StolikiSync *stoliki_sync; // synchronizacja dostępu do tablicy stolików
+extern struct QueueSync *queue_sync;     // synchronizacja kolejki (licznik + cond)
+extern int *kolej_podsumowania;          // czyja kolej na podsumowanie (1=obsługa, 2=kucharz, 3=kierownik)
+extern int *klienci_w_kolejce;           // statystyka: liczba klientów w kolejce
+extern int *klienci_przyjeci;            // statystyka: liczba przyjętych klientów
+extern int *klienci_opuscili;            // statystyka: liczba klientów którzy opuścili restaurację
+extern const int ILOSC_STOLIKOW[4];      // liczba stolików o pojemności 1,2,3,4
+extern const int CENY_DAN[6];            // ceny dań
 extern pid_t pid_obsluga, pid_kucharz, pid_kierownik;
 // PID-y procesów w pamięci współdzielonej (potrzebne po exec(), np. do wysyłania sygnałów)
-extern pid_t *pid_obsluga_shm;
-extern pid_t *pid_kierownik_shm;
+extern pid_t *pid_obsluga_shm;   // wskaźnik na PID procesu obsługi w pamięci współdzielonej
+extern pid_t *pid_kierownik_shm; // wskaźnik na PID procesu kierownika w pamięci współdzielonej
+// ====== SEMAFORY (INDEKSY) ======
 
-#define SEM_STOLIKI 0
-#define SEM_TASMA 1
-#define SEM_KOLEJKA 2
-#define SEM_TURA 3
-// Dodatkowy semafor informujący o liczbie wiadomości w kolejce
-#define SEM_MSGS 4
+// Semafor sygnalizujący zmianę tury podsumowania
+#define SEM_TURA 0
 // Semafor wybudzający kierownika do okresowych działań
-#define SEM_KIEROWNIK 5
+#define SEM_KIEROWNIK 1
 
 // Maksymalna liczba komunikatów w kolejce wejściowej (ograniczana semaforem),
 // żeby nie doprowadzić do przepełnienia kolejki System V przy dużej liczbie klientów.
@@ -82,11 +80,14 @@ extern pid_t *pid_kierownik_shm;
 // zapełniona — to pozwala na operacje "cofnij do kolejki" lub inne priorytetowe
 // wpisy administracyjne.
 #define MAX_KOLEJKA_MSG 128
-#define KOLEJKA_REZERWA 1 // ile slotów rezerwujemy (domyślnie 1)
+#define KOLEJKA_REZERWA 2 // ile slotów rezerwujemy (domyślnie 1)
+
+// ====== STRUKTURY DANYCH ======
 
 struct Grupa // struktura reprezentująca grupę klientów
 {
-    pid_t proces_id;         // PID procesu grupy
+    int numer_grupy;         // numer grupy (sekwencyjny)
+    pid_t proces_id;         // PID procesu klienta
     int osoby;               // liczba osób w grupie
     int dzieci;              // liczba dzieci
     int dorosli;             // liczba dorosłych
@@ -110,6 +111,28 @@ struct Talerzyk // struktura reprezentująca danie na taśmie
 {
     int cena;
     int stolik_specjalny; // 0 = normalne danie, >0 = numer stolika dla zamówienia specjalnego
+};
+
+struct TasmaSync
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+    int count; // liczba zajętych talerzyków na taśmie
+};
+
+struct StolikiSync
+{
+    pthread_mutex_t mutex; // chroni dostęp do tablicy `stoliki`
+};
+
+struct QueueSync
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+    int count; // liczba wiadomości obecnie w kolejce
+    int max;   // maksymalna dozwolona pojemność
 };
 
 // ====== DEKLARACJE FUNKCJI ======
@@ -141,7 +164,7 @@ struct Grupa kolejka_pobierz(void);
 /**
  * Proces klienta.
  */
-void klient(void);
+void klient(int numer_grupy);
 
 /**
  * Proces obsługi.
@@ -165,6 +188,7 @@ void generator_stolikow(struct Stolik *stoliki);
 
 /**
  * Dodaje danie na taśmę.
+ * Wymaga zablokowanego tasma_sync->mutex.
  */
 void dodaj_danie(struct Talerzyk *tasma, int cena);
 

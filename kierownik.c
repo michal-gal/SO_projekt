@@ -8,43 +8,50 @@
 #include <sys/msg.h>
 #include <unistd.h>
 
+// Global shutdown flag
 static volatile sig_atomic_t shutdown_requested = 0;
 
-static void kierownik_obsluz_sigterm(int signo) // handler dla SIGTERM
+// Forward declarations
+static void kierownik_obsluz_sigterm(int signo);
+static void kierownik_wyslij_sygnal(void);
+
+// Signal handler for SIGTERM
+static void kierownik_obsluz_sigterm(int signo)
 {
     (void)signo;
     shutdown_requested = 1;
 }
 
-static void kierownik_wyslij_sygnal(void) // kierownik wysyła sygnał do obsługi lub zamyka restaurację
+// Send signal to obsluga or close restaurant
+static void kierownik_wyslij_sygnal(void)
 {
-    // Używamy sygnałów do komunikacji z obsługą:
-    // - SIGUSR1: zwiększ wydajność
-    // - SIGUSR2: zmniejsz wydajność
-    // - SIGTERM: zamknij restaurację i zakończ klientów (kierownik ubija klientów)
-    // Pozostałe wartości = brak akcji (normalna praca).
-    int v = rand() % 1000000;                                /* make signals ~10x rarer */
-    pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0; // Pobierz PID obsługi z pamięci współdzielonej.
+    // Use signals to communicate with obsluga:
+    // - SIGUSR1: increase performance
+    // - SIGUSR2: decrease performance
+    // - SIGTERM: close restaurant and terminate clients
+    // Other values = no action (normal operation).
+    int random_value = rand() % 1000000;                     // Make signals ~10x rarer
+    pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0; // Get obsluga PID from shared memory
 
-    if (v == 1) //
+    if (random_value == 1) // ~0.0001% chance for SIGUSR1
     {
         if (pid_obsl > 0)
         {
             if (kill(pid_obsl, SIGUSR1) != 0 && errno != ESRCH)
                 LOGE_ERRNO("kill(SIGUSR1) obsluga");
         }
-        //   LOGI("Kierownik wysyła SIGUSR1 do obsługi (PID %d)\n", pid_obsl);
+        // LOGI("Kierownik wysyła SIGUSR1 do obsługi (PID %d)\n", pid_obsl);
     }
-    else if (v == 2) // 2% szans na SIGUSR2
+    else if (random_value == 2) // ~0.0001% chance for SIGUSR2
     {
         if (pid_obsl > 0)
         {
             if (kill(pid_obsl, SIGUSR2) != 0 && errno != ESRCH)
                 LOGE_ERRNO("kill(SIGUSR2) obsluga");
         }
-        //   LOGI("Kierownik wysyła SIGUSR2 do obsługi (PID %d)\n", pid_obsl);
+        // LOGI("Kierownik wysyła SIGUSR2 do obsługi (PID %d)\n", pid_obsl);
     }
-    // else if (v == 3) // 2% szans na zamknięcie restauracji przez kierownika
+    // else if (random_value == 3) // ~0.0001% chance to close restaurant
     // {
     //     if (!disable_close)
     //     {
@@ -58,30 +65,32 @@ static void kierownik_wyslij_sygnal(void) // kierownik wysyła sygnał do obsłu
     // }
     else
     {
-        // Brak akcji
+        // No action
     }
 }
 
-void kierownik(void) // główna funkcja procesu kierownika
+// Main manager function
+void kierownik(void)
 {
     if (pid_kierownik_shm)
         *pid_kierownik_shm = getpid();
 
     zainicjuj_losowosc();
 
+    // Set signal handler
     if (signal(SIGTERM, kierownik_obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
 
     ustaw_shutdown_flag(&shutdown_requested);
 
-    /* Periodically perform manager actions when woken via SEM_KIEROWNIK.
-       Restauracja (or any controller) may post SEM_KIEROWNIK to trigger
-       `kierownik_wyslij_sygnal()` which sends occasional signals to `obsluga`. */
+    // Periodically perform manager actions when woken via SEM_KIEROWNIK.
+    // Restauracja (or any controller) may post SEM_KIEROWNIK to trigger
+    // kierownik_wyslij_sygnal() which sends occasional signals to obsluga.
     while (*restauracja_otwarta && !shutdown_requested)
     {
-        LOGI("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
+        LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
         sem_operacja(SEM_KIEROWNIK, -1);
-        LOGI("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
+        LOGD("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
         kierownik_wyslij_sygnal();
         if (shutdown_requested)
             break;
@@ -93,7 +102,8 @@ void kierownik(void) // główna funkcja procesu kierownika
     exit(0);
 }
 
-int main(int argc, char **argv) // punkt wejścia procesu kierownika
+// Main entry point
+int main(int argc, char **argv)
 {
     if (argc != 4)
     {

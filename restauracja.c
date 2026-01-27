@@ -12,6 +12,9 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
+
+// ====== ZMIENNE GLOBALNE ======
 
 static char arg_shm[32];
 static char arg_sem[32];
@@ -23,6 +26,8 @@ static pid_t children_pgid = -1;
 
 static volatile sig_atomic_t sigint_requested = 0; // czy został otrzymany SIGINT/SIGQUIT
 static volatile sig_atomic_t shutdown_signal = 0;  // który sygnał spowodował zamknięcie
+
+// ====== HANDLERY SYGNAŁÓW ======
 
 static void zamknij_odziedziczone_fd_przed_exec(void)
 {
@@ -76,6 +81,8 @@ static void restauracja_on_sigcont(int signo) // handler dla SIGCONT
         (void)kill(-children_pgid, SIGCONT);
 }
 
+// ====== ZARZĄDZANIE PROCESAMI ======
+
 static void zbierz_zombie_nieblokujaco(int *status) // zbiera zakończone procesy potomne
 {
     for (;;)
@@ -83,7 +90,7 @@ static void zbierz_zombie_nieblokujaco(int *status) // zbiera zakończone proces
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        LOGI("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n", (int)getpid(), (int)p, (status ? *status : -1));
+        LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n", (int)getpid(), (int)p, (status ? *status : -1));
     }
 }
 
@@ -95,20 +102,29 @@ static int zbierz_zombie_nieblokujaco_licznik(int *status) // zbiera zakończone
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        LOGI("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n", (int)getpid(), (int)p);
+        LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n", (int)getpid(), (int)p);
         if (p != pid_obsluga && p != pid_kucharz && p != pid_kierownik)
             reaped++;
     }
     return reaped;
 }
 
-static pid_t uruchom_potomka_exec(const char *file, const char *argv0) // uruchamia proces potomny przez fork()+exec()
+static pid_t uruchom_potomka_exec(const char *file, const char *argv0, int numer_grupy, int is_klient) // uruchamia proces potomny przez fork()+exec()
 {
     pid_t pid = fork();
     if (pid == 0)
     {
         zamknij_odziedziczone_fd_przed_exec();
-        execl(file, argv0, arg_shm, arg_sem, arg_msgq, (char *)NULL);
+        if (is_klient)
+        {
+            char arg_grupa[32];
+            snprintf(arg_grupa, sizeof(arg_grupa), "%d", numer_grupy);
+            execl(file, argv0, arg_shm, arg_sem, arg_msgq, arg_grupa, (char *)NULL);
+        }
+        else
+        {
+            execl(file, argv0, arg_shm, arg_sem, arg_msgq, (char *)NULL);
+        }
         LOGE_ERRNO("execl");
         _exit(127);
     }
@@ -134,17 +150,17 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
     const int timeout_term = 8;
     const int timeout_kill = 3;
 
-    LOGI("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
+    LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
     if (children_pgid > 0)
     {
-        LOGI("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n", (int)getpid(), (int)children_pgid);
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n", (int)getpid(), (int)children_pgid);
         kill(-children_pgid, SIGTERM);
     }
 
     time_t start = time(NULL);
     while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_term)
     {
-        LOGI("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
         zbierz_zombie_nieblokujaco(status);
         sched_yield();
     }
@@ -153,14 +169,14 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
     {
         if (children_pgid > 0)
         {
-            LOGI("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n", (int)getpid(), (int)children_pgid);
+            LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n", (int)getpid(), (int)children_pgid);
             kill(-children_pgid, SIGKILL);
         }
 
         start = time(NULL);
         while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_kill)
         {
-            LOGI("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
+            LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
             zbierz_zombie_nieblokujaco(status);
             sched_yield();
         }
@@ -168,14 +184,16 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
 
     while (waitpid(-1, NULL, WNOHANG) > 0)
     {
-        LOGI("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n", (int)getpid());
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n", (int)getpid());
     }
-    LOGI("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
+    LOGD("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
 }
 
-static pid_t generator_utworz_jedna_grupe(void) // tworzy jedną grupę klientów
+// ====== GENERATOR KLIENTÓW ======
+
+static pid_t generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grupę klientów
 {
-    pid_t pid = uruchom_potomka_exec("./klient", "klient");
+    pid_t pid = uruchom_potomka_exec("./klient", "klient", numer_grupy, 1);
     if (pid < 0)
     {
         if (restauracja_otwarta)
@@ -186,6 +204,8 @@ static pid_t generator_utworz_jedna_grupe(void) // tworzy jedną grupę klientó
         (void)setpgid(pid, children_pgid);
     return pid;
 }
+
+// ====== AWARYJNE ZAMKNIĘCIE ======
 
 static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 {
@@ -247,7 +267,7 @@ int main(void)
     *kolej_podsumowania = 1;  // ustaw kolej na obsługę
     sygnalizuj_ture();
 
-    pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga"); // uruchom proces obsługa
+    pid_obsluga = uruchom_potomka_exec("./obsluga", "obsluga", 0, 0); // uruchom proces obsługa
     if (pid_obsluga < 0)
         return awaryjne_zamkniecie_fork();
     *pid_obsluga_shm = pid_obsluga;
@@ -260,16 +280,17 @@ int main(void)
     // Ponieważ dzieci są w osobnej grupie, forwardujemy je, żeby program reagował jak użytkownik oczekuje.
     signal(SIGINT, restauracja_on_sigint);   // handler dla SIGINT/SIGQUIT
     signal(SIGQUIT, restauracja_on_sigint);  // handler dla SIGINT/SIGQUIT
+    signal(SIGTERM, restauracja_on_sigint);  // handler dla SIGTERM (eg. timeout)
     signal(SIGTSTP, restauracja_on_sigtstp); // handler dla SIGTSTP
     signal(SIGCONT, restauracja_on_sigcont); // handler dla SIGCONT
 
-    pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz"); // uruchom proces kucharz
+    pid_kucharz = uruchom_potomka_exec("./kucharz", "kucharz", 0, 0); // uruchom proces kucharz
     if (pid_kucharz < 0)
         return awaryjne_zamkniecie_fork();
     if (children_pgid > 0)
         (void)setpgid(pid_kucharz, children_pgid);
 
-    pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik"); // uruchom proces kierownik
+    pid_kierownik = uruchom_potomka_exec("./kierownik", "kierownik", 0, 0); // uruchom proces kierownik
     if (pid_kierownik < 0)
         return awaryjne_zamkniecie_fork();
     *pid_kierownik_shm = pid_kierownik;
@@ -290,16 +311,15 @@ int main(void)
             max_aktywnych_klientow = (int)v;
     }
 
+    /* uruchom wątek zbierający zombie w tle */
+    /* USUNIĘTY: watek_zombie powoduje wyścig z waitpid w głównej pętli */
+    /*
+    if (pthread_create(&t_zombie, NULL, watek_zombie, NULL) != 0)
+        LOGE_ERRNO("pthread_create(zombie)");
+    */
     int aktywni_klienci = 0;
-#ifdef TEST_NO_SLEEP
-    /* When TEST_NO_SLEEP is enabled, creation is very fast and can
-       spawn too many processes for the test environment. Reduce
-       the number to avoid resource exhaustion during tests. */
-    int liczba_utworzonych_grup = 100; // reduced for TEST_NO_SLEEP
-#else
-    int liczba_utworzonych_grup = 5000; // liczba grup do utworzenia
-#endif
-    /* Interval (seconds) between waking the manager via SEM_KIEROWNIK. */
+    int liczba_utworzonych_grup = MAX_LOSOWYCH_GRUP; // liczba grup do utworzenia
+    /* Interwał (sekundy) między budzeniem kierownika poprzez SEM_KIEROWNIK. */
     int kierownik_interval = 30;
     const char *kier_env = getenv("RESTAURACJA_KIEROWNIK_INTERVAL");
     if (kier_env && *kier_env)
@@ -311,9 +331,10 @@ int main(void)
             kierownik_interval = (int)v;
     }
     time_t last_kierownik_post = time(NULL);
+    int numer_grupy = 1; // licznik grup klientów
     while (liczba_utworzonych_grup-- && !sigint_requested)
     {
-        /* Periodically wake the manager to perform its actions. */
+        /* Okresowo budź kierownika, aby wykonywał swoje działania. */
         if (kierownik_interval > 0 && time(NULL) - last_kierownik_post >= kierownik_interval)
         {
             sem_operacja(SEM_KIEROWNIK, 1);
@@ -339,12 +360,15 @@ int main(void)
             }
         }
 
-        pid_t pid = generator_utworz_jedna_grupe();
+        pid_t pid = generator_utworz_jedna_grupe(numer_grupy++);
         if (pid > 0)
+        {
             aktywni_klienci++;
+        }
         if (liczba_utworzonych_grup == 0)
         {
             printf("Utworzono wszystkie grupy klientów.\n");
+            sleep(3); // daj chwilę na przetworzenie
         }
     };
     // symulacja pracy restauracji przez 50 sekund (bez sleep)
@@ -352,7 +376,7 @@ int main(void)
         time_t sim_start = time(NULL);
         while (time(NULL) - sim_start < 50 && !sigint_requested)
         {
-            /* Periodically wake the manager during simulation as well. */
+            /* Okresowo budź kierownika podczas symulacji również. */
             if (kierownik_interval > 0 && time(NULL) - last_kierownik_post >= kierownik_interval)
             {
                 sem_operacja(SEM_KIEROWNIK, 1);
@@ -367,6 +391,9 @@ int main(void)
     int przerwano_sygnalem = sigint_requested;                                             // czy zakończenie z powodu sygnału przerwania
     int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem && !*restauracja_otwarta); // czy zakończenie z powodu zamknięcia restauracji flagą
 
+    LOGD("restauracja: pid=%d shutdown flags: koniec_czasu=%d przerwano_sygnalem=%d zamknieto_flaga=%d shutdown_signal=%d\n",
+         (int)getpid(), koniec_czasu, przerwano_sygnalem, zamknieto_flaga, (int)shutdown_signal);
+
     *restauracja_otwarta = 0; // zamknij restaurację
     if (przerwano_sygnalem)
         LOGS("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
@@ -376,27 +403,40 @@ int main(void)
         LOGS("\n===Czas pracy restauracji minął!===\n");
 
     *kolej_podsumowania = 1;
+    LOGD("restauracja: pid=%d set kolej_podsumowania=1, signaling SEM_TURA\n", (int)getpid());
     sygnalizuj_ture();
 
-    LOGI("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
+    LOGD("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
 
     // Dodatkowo: ubij klientów i wyczyść stoliki/kolejkę, żeby nie zostawić
     // osieroconego stanu w pamięci współdzielonej przy przerwaniu.
-    LOGI("restauracja: pid=%d calling zakoncz_klientow_i_wyczysc_stoliki_i_kolejke()\n", (int)getpid());
+    LOGD("restauracja: pid=%d calling zakoncz_klientow_i_wyczysc_stoliki_i_kolejke()\n", (int)getpid());
     zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
-    LOGI("restauracja: pid=%d returned from zakoncz_klientow...\n", (int)getpid());
+    LOGD("restauracja: pid=%d returned from zakoncz_klientow...\n", (int)getpid());
 
     // Prosto: kończymy wszystkie dzieci jednym mechanizmem, niezależnie od typu procesu.
-    LOGI("restauracja: pid=%d calling zakoncz_wszystkie_dzieci()\n", (int)getpid());
+    LOGD("restauracja: pid=%d calling zakoncz_wszystkie_dzieci()\n", (int)getpid());
     zakoncz_wszystkie_dzieci(&status);
-    LOGI("restauracja: pid=%d returned from zakoncz_wszystkie_dzieci()\n", (int)getpid());
+    LOGD("restauracja: pid=%d returned from zakoncz_wszystkie_dzieci()\n", (int)getpid());
 
-    LOGI("restauracja: pid=%d removing IPC resources shm=%d sem=%d msgq=%d\n", (int)getpid(), shm_id, sem_id, msgq_id);
+    /* zatrzymaj wątek zbierający zombie i połącz go */
+    /* USUNIĘTY: watek_zombie
+    (void)pthread_kill(t_zombie, SIGTERM);
+    (void)pthread_join(t_zombie, NULL);
+    */
+
+    LOGD("restauracja: pid=%d removing IPC resources shm=%d sem=%d msgq=%d\n", (int)getpid(), shm_id, sem_id, msgq_id);
     shmctl(shm_id, IPC_RMID, NULL); // usuń pamięć współdzieloną
     semctl(sem_id, 0, IPC_RMID);    // usuń semafory
     if (msgq_id >= 0)               // usuń kolejkę komunikatów
         msgctl(msgq_id, IPC_RMID, NULL);
-    LOGI("restauracja: pid=%d IPC resources removed\n", (int)getpid());
+    LOGD("restauracja: pid=%d IPC resources removed\n", (int)getpid());
+
+    LOGS("\n=== STATYSTYKI KLIENTÓW ===\n");
+    LOGS("Klienci w kolejce: %d\n", *klienci_w_kolejce);
+    LOGS("Klienci przyjęci: %d\n", *klienci_przyjeci);
+    LOGS("Klienci którzy opuścili restaurację: %d\n", *klienci_opuscili);
+    LOGS("===========================\n");
 
     LOGS("Program zakończony.\n");
     return 0;

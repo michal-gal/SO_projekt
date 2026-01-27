@@ -9,23 +9,68 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
+// ====== TYPY ======
+
+typedef enum
+{
+    POBRANIE_BRAK = 0,
+    POBRANIE_POBRANO = 1,
+    POBRANIE_POMINIETO_INNY_STOLIK = 2,
+} WynikPobraniaDania;
+
+typedef struct
+{
+    struct Grupa *g;
+    int is_lead;
+    int is_adult;
+    int *shared_dania_pobrane;
+    int *dania_do_pobrania_ptr;
+    time_t *czas_start_dania_ptr;
+    int timeout_dania;
+} PersonArg;
+
+// ====== ZMIENNE GLOBALNE ======
+
+// Globalna flaga zamknięcia
 static volatile sig_atomic_t prosba_zamkniecia = 0;
 
+// Mutex do ochrony liczników klienta aktualizowanych przez wątki osób
+static pthread_mutex_t klient_dania_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// ====== DEKLARACJE WSTĘPNE ======
+
+static void klient_obsluz_sigterm(int signo);
+static void klient_obsluz_sigusr1(int signo);
+static struct Grupa inicjalizuj_grupe(int numer_grupy);
+static void usadz_grupe_vip(struct Grupa *g);
+static int czekaj_na_przydzial_stolika(struct Grupa *g);
+static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, time_t *czas_start_dania, int timeout_dania);
+static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania);
+static void zaplac_za_dania(const struct Grupa *g);
+static void opusc_stolik(const struct Grupa *g);
+static void petla_czekania_na_dania(struct Grupa *g);
+static void *person_thread(void *arg);
+
+// Handler sygnału SIGTERM
 static void klient_obsluz_sigterm(int signo)
 {
     (void)signo;
     prosba_zamkniecia = 1;
 }
 
+// Handler sygnału SIGUSR1
 static void klient_obsluz_sigusr1(int signo)
 {
     (void)signo;
 }
 
-static struct Grupa inicjalizuj_grupe(void)
+// Inicjalizuj grupę klientów
+static struct Grupa inicjalizuj_grupe(int numer_grupy)
 {
     struct Grupa g;
+    g.numer_grupy = numer_grupy;
     g.proces_id = getpid();
     g.osoby = rand() % 4 + 1;
     g.dorosli = rand() % g.osoby + 1;
@@ -38,6 +83,7 @@ static struct Grupa inicjalizuj_grupe(void)
     return g;
 }
 
+// Usadź grupę VIP
 static void usadz_grupe_vip(struct Grupa *g)
 {
     int log_usadzono = 0;
@@ -45,7 +91,7 @@ static void usadz_grupe_vip(struct Grupa *g)
     int log_zajete = 0;
     int log_pojemnosc = 0;
 
-    sem_operacja(SEM_STOLIKI, -1);
+    pthread_mutex_lock(&stoliki_sync->mutex);
     int i = znajdz_stolik_dla_grupy_zablokowanej(g);
     if (i >= 0)
     {
@@ -58,11 +104,11 @@ static void usadz_grupe_vip(struct Grupa *g)
         log_pojemnosc = stoliki[i].pojemnosc;
         g->stolik_przydzielony = i;
     }
-    sem_operacja(SEM_STOLIKI, 1);
+    pthread_mutex_unlock(&stoliki_sync->mutex);
 
     if (log_usadzono)
         LOGI("Grupa VIP %d usadzona: %d osób (dorosłych: %d, dzieci: %d) przy stoliku: %d (miejsc zajete: %d/%d)\n",
-             g->proces_id,
+             g->numer_grupy,
              g->osoby,
              g->dorosli,
              g->dzieci,
@@ -71,20 +117,21 @@ static void usadz_grupe_vip(struct Grupa *g)
              log_pojemnosc);
 }
 
+// Czekaj na przydział stolika
 static int czekaj_na_przydzial_stolika(struct Grupa *g)
 {
     pid_t moj_proces_id = g->proces_id;
     sigset_t block_set, old_set;
     sigemptyset(&block_set);
     sigaddset(&block_set, SIGUSR1);
-    /* Block SIGUSR1 before adding to the queue to avoid a race where
-      the manager/obsługa sends SIGUSR1 between enqueue and blocking,
-      which could cause the client to miss the wakeup. */
+    // Zablokuj SIGUSR1 przed dodaniem do kolejki, aby uniknąć wyścigu, gdzie
+    // manager/obsluga wysyła SIGUSR1 między enqueue a blokowaniem,
+    // co mogłoby spowodować, że klient przegapi przebudzenie.
     sigprocmask(SIG_BLOCK, &block_set, &old_set);
 
     kolejka_dodaj(*g);
-    LOGI("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
-         g->proces_id,
+    LOGS("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
+         g->numer_grupy,
          g->osoby,
          g->dorosli,
          g->dzieci,
@@ -94,7 +141,7 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
     {
         int log_znaleziono = 0;
         int log_numer_stolika = 0;
-        sem_operacja(SEM_STOLIKI, -1);
+        pthread_mutex_lock(&stoliki_sync->mutex);
         for (int i = 0; i < MAX_STOLIKI; i++)
         {
             for (int j = 0; j < stoliki[i].liczba_grup; j++)
@@ -110,10 +157,10 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
             if (g->stolik_przydzielony != -1)
                 break;
         }
-        sem_operacja(SEM_STOLIKI, 1);
+        pthread_mutex_unlock(&stoliki_sync->mutex);
 
         if (log_znaleziono)
-            LOGI("Grupa %d znalazała swój stolik: %d\n", g->proces_id, log_numer_stolika);
+            LOGD("Grupa %d znalazała swój stolik: %d\n", g->numer_grupy, log_numer_stolika);
 
         if (g->stolik_przydzielony == -1 && *restauracja_otwarta && !prosba_zamkniecia)
         {
@@ -125,12 +172,13 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
 
     if (g->stolik_przydzielony == -1)
     {
-        LOGI("Grupa %d opuszcza kolejkę - restauracja zamknięta\n", g->proces_id);
+        LOGI("Grupa %d opuszcza kolejkę - restauracja zamknięta\n", g->numer_grupy);
         return -1;
     }
     return 0;
 }
 
+// Zamów specjalne jeśli trzeba
 static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, time_t *czas_start_dania, int timeout_dania)
 {
     if (time(NULL) - *czas_start_dania <= timeout_dania)
@@ -143,28 +191,57 @@ static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania
     g->danie_specjalne = c;
     (*dania_do_pobrania)++;
 
-    sem_operacja(SEM_STOLIKI, -1);
+    pthread_mutex_lock(&stoliki_sync->mutex);
     for (int j = 0; j < stoliki[g->stolik_przydzielony].liczba_grup; j++)
     {
-        if (stoliki[g->stolik_przydzielony].grupy[j].proces_id == g->proces_id)
+        if (stoliki[g->stolik_przydzielony].grupy[j].numer_grupy == g->numer_grupy)
         {
             stoliki[g->stolik_przydzielony].grupy[j].danie_specjalne = c;
             break;
         }
     }
-    sem_operacja(SEM_STOLIKI, 1);
+    pthread_mutex_unlock(&stoliki_sync->mutex);
 
-    LOGI("Grupa %d zamawia danie specjalne za: %d zł. \n", g->proces_id, g->danie_specjalne);
+    LOGI("Grupa %d zamawia danie specjalne za: %d zł. \n", g->numer_grupy, g->danie_specjalne);
     *czas_start_dania = time(NULL);
 }
 
-typedef enum
+// Wątek osoby
+static void *person_thread(void *arg)
 {
-    POBRANIE_BRAK = 0,
-    POBRANIE_POBRANO = 1,
-    POBRANIE_POMINIETO_INNY_STOLIK = 2,
-} WynikPobraniaDania;
+    PersonArg *pa = (PersonArg *)arg;
+    struct Grupa *g = pa->g;
+    int local_is_lead = pa->is_lead;
+    int timeout = pa->timeout_dania;
 
+    for (;;)
+    {
+        pthread_mutex_lock(&klient_dania_mutex);
+        int done = *pa->shared_dania_pobrane;
+        int target = *pa->dania_do_pobrania_ptr;
+        pthread_mutex_unlock(&klient_dania_mutex);
+
+        if (done >= target || !*restauracja_otwarta || prosba_zamkniecia)
+            break;
+
+        if (local_is_lead)
+            zamow_specjalne_jesli_trzeba(g, pa->dania_do_pobrania_ptr, pa->czas_start_dania_ptr, timeout);
+
+        WynikPobraniaDania wynik = sprobuj_pobrac_danie(g, pa->shared_dania_pobrane, target, pa->czas_start_dania_ptr);
+        if (wynik == POBRANIE_POMINIETO_INNY_STOLIK)
+        {
+            sched_yield();
+            continue;
+        }
+
+        sched_yield();
+    }
+
+    free(pa);
+    return NULL;
+}
+
+// Spróbuj pobrać danie
 static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania)
 {
     int log_pobrano = 0;
@@ -172,21 +249,41 @@ static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobra
     int log_numer_stolika = g->stolik_przydzielony + 1;
     int log_pobrane = 0;
     int log_do_pobrania = dania_do_pobrania;
-    pid_t log_pid = g->proces_id;
+    pid_t log_pid = g->numer_grupy;
 
-    sem_operacja(SEM_TASMA, -1);
-    if (tasma[g->stolik_przydzielony].cena != 0)
+    pthread_mutex_lock(&tasma_sync->mutex);
+    int numer_stolika = g->stolik_przydzielony + 1;
+    int idx_tasma = -1;
+    int cena = 0;
+
+    // Najpierw spróbuj znaleźć danie specjalne dla tego stolika gdziekolwiek na taśmie.
+    for (int i = 0; i < MAX_TASMA; i++)
     {
-        int numer_stolika = g->stolik_przydzielony + 1;
+        if (tasma[i].cena != 0 && tasma[i].stolik_specjalny == numer_stolika)
+        {
+            idx_tasma = i;
+            cena = tasma[i].cena;
+            break;
+        }
+    }
+
+    // Jeśli nie znaleziono specjalnego, sprawdź standardowe danie na pozycji stolika.
+    if (idx_tasma == -1 && tasma[g->stolik_przydzielony].cena != 0)
+    {
         if (tasma[g->stolik_przydzielony].stolik_specjalny != 0 &&
             tasma[g->stolik_przydzielony].stolik_specjalny != numer_stolika)
         {
-            sem_operacja(SEM_TASMA, 1);
+            pthread_mutex_unlock(&tasma_sync->mutex);
             return POBRANIE_POMINIETO_INNY_STOLIK;
         }
+        idx_tasma = g->stolik_przydzielony;
+        cena = tasma[g->stolik_przydzielony].cena;
+    }
 
-        int cena = tasma[g->stolik_przydzielony].cena;
+    if (idx_tasma != -1)
+    {
         int idx = cena_na_indeks(cena);
+        pthread_mutex_lock(&klient_dania_mutex);
         if (idx >= 0)
             g->pobrane_dania[idx]++;
 
@@ -194,12 +291,15 @@ static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobra
         log_pobrano = 1;
         log_cena = cena;
         log_pobrane = *dania_pobrane;
+        pthread_mutex_unlock(&klient_dania_mutex);
 
-        tasma[g->stolik_przydzielony].cena = 0;
-        tasma[g->stolik_przydzielony].stolik_specjalny = 0;
+        tasma[idx_tasma].cena = 0;
+        tasma[idx_tasma].stolik_specjalny = 0;
+        if (tasma_sync->count > 0)
+            tasma_sync->count--;
+        pthread_cond_signal(&tasma_sync->not_full);
         *czas_start_dania = time(NULL);
-
-        sem_operacja(SEM_TASMA, 1);
+        pthread_mutex_unlock(&tasma_sync->mutex);
 
         if (log_pobrano)
             LOGI("Grupa %d przy stoliku %d pobrała danie za %d zł (pobrane: %d/%d)\n",
@@ -211,19 +311,33 @@ static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobra
         return POBRANIE_POBRANO;
     }
 
-    sem_operacja(SEM_TASMA, 1);
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0)
+    {
+        ts.tv_nsec += 10 * 1000 * 1000; // 10ms
+        if (ts.tv_nsec >= 1000000000L)
+        {
+            ts.tv_sec += 1;
+            ts.tv_nsec -= 1000000000L;
+        }
+        (void)pthread_cond_timedwait(&tasma_sync->not_empty, &tasma_sync->mutex, &ts);
+    }
+
+    pthread_mutex_unlock(&tasma_sync->mutex);
     return POBRANIE_BRAK;
 }
 
+// Zapłać za dania
 static void zaplac_za_dania(const struct Grupa *g)
 {
-    LOGI("Grupa %d przy stoliku %d gotowa do płatności\n", g->proces_id, g->stolik_przydzielony + 1);
+    LOGI("Grupa %d przy stoliku %d gotowa do płatności\n", g->numer_grupy, g->stolik_przydzielony + 1);
 
     int log_ilosc[6] = {0};
     int log_cena[6] = {0};
     int log_kwota[6] = {0};
 
-    sem_operacja(SEM_TASMA, -1);
+    pthread_mutex_lock(&tasma_sync->mutex);
+    pthread_mutex_lock(&klient_dania_mutex);
     for (int i = 0; i < 6; i++)
     {
         if (g->pobrane_dania[i] == 0)
@@ -235,29 +349,31 @@ static void zaplac_za_dania(const struct Grupa *g)
         log_cena[i] = CENY_DAN[i];
         log_kwota[i] = kwota;
     }
-    sem_operacja(SEM_TASMA, 1);
+    pthread_mutex_unlock(&klient_dania_mutex);
+    pthread_mutex_unlock(&tasma_sync->mutex);
 
     for (int i = 0; i < 6; i++)
     {
         if (log_ilosc[i] == 0)
             continue;
         LOGI("Grupa %d płaci za %d dań za %d zł każde, łącznie: %d zł\n",
-             g->proces_id,
+             g->numer_grupy,
              log_ilosc[i],
              log_cena[i],
              log_kwota[i]);
     }
 }
 
+// Opuść stolik
 static void opusc_stolik(const struct Grupa *g)
 {
-    pid_t log_pid = g->proces_id;
+    pid_t log_pid = g->numer_grupy;
     int log_numer_stolika = g->stolik_przydzielony + 1;
 
-    sem_operacja(SEM_STOLIKI, -1);
+    pthread_mutex_lock(&stoliki_sync->mutex);
     for (int j = 0; j < stoliki[g->stolik_przydzielony].liczba_grup; j++)
     {
-        if (stoliki[g->stolik_przydzielony].grupy[j].proces_id == g->proces_id)
+        if (stoliki[g->stolik_przydzielony].grupy[j].numer_grupy == g->numer_grupy)
         {
             for (int k = j; k < stoliki[g->stolik_przydzielony].liczba_grup - 1; k++)
             {
@@ -269,40 +385,69 @@ static void opusc_stolik(const struct Grupa *g)
             break;
         }
     }
-    sem_operacja(SEM_STOLIKI, 1);
+    pthread_mutex_unlock(&stoliki_sync->mutex);
 
-    LOGI("Grupa %d przy stoliku %d opuszcza restaurację.\n", log_pid, log_numer_stolika);
+    (*klienci_opuscili)++;
+    LOGS("Grupa %d przy stoliku %d opuszcza restaurację.\n", log_pid, log_numer_stolika);
 }
 
+// Pętla czekania na dania
 static void petla_czekania_na_dania(struct Grupa *g)
 {
-    int dania_pobrane = 0;
+    // Wielowątkowa: uruchom jeden wątek na osobę (dorosły/dziecko). Główny wątek
+    // będzie czekać na ich zakończenie. Jeden wyznaczony wątek lider będzie obsługiwał
+    // zamówienia specjalne, aby uniknąć wyścigów. Wspólne liczniki są chronione przez
+    // `klient_dania_mutex` (zakres pliku).
+
     int dania_do_pobrania = rand() % 8 + 3;
+    int shared_dania_pobrane = 0;
     time_t czas_start_dania = time(NULL);
-    int timeout_dania = 5;
+    int timeout_dania = 1;
 
-    while (dania_pobrane < dania_do_pobrania && *restauracja_otwarta && !prosba_zamkniecia)
+    int persons = g->osoby;
+    pthread_t *threads = calloc(persons, sizeof(pthread_t));
+    if (!threads)
     {
-        if (time(NULL) - czas_start_dania > timeout_dania * 4)
-        {
-            LOGI("Grupa %d timeout czekania na dania - kończy się\n", g->proces_id);
-            break;
-        }
+        LOGE("Brak pamięci na wątki\n");
+        return;
+    }
 
-        zamow_specjalne_jesli_trzeba(g, &dania_do_pobrania, &czas_start_dania, timeout_dania);
-
-        WynikPobraniaDania wynik = sprobuj_pobrac_danie(g, &dania_pobrane, dania_do_pobrania, &czas_start_dania);
-        if (wynik == POBRANIE_POMINIETO_INNY_STOLIK)
+    for (int i = 0; i < persons; i++)
+    {
+        PersonArg *pa = malloc(sizeof(PersonArg));
+        if (!pa)
         {
-            sched_yield();
+            LOGE("Brak pamięci na PersonArg\n");
             continue;
         }
+        pa->g = g;
+        pa->is_adult = (i < g->dorosli) ? 1 : 0;
+        pa->is_lead = (i == 0) ? 1 : 0; // pierwsza osoba obsługuje zamówienia specjalne
+        pa->shared_dania_pobrane = &shared_dania_pobrane;
+        pa->dania_do_pobrania_ptr = &dania_do_pobrania;
+        pa->czas_start_dania_ptr = &czas_start_dania;
+        pa->timeout_dania = timeout_dania;
 
-        sched_yield();
+        if (pthread_create(&threads[i], NULL, person_thread, pa) != 0)
+        {
+            LOGE_ERRNO("pthread_create(person)");
+            free(pa);
+            threads[i] = 0;
+        }
     }
+
+    // Czekaj na zakończenie wszystkich wątków osób
+    for (int i = 0; i < persons; i++)
+    {
+        if (threads[i])
+            (void)pthread_join(threads[i], NULL);
+    }
+
+    free(threads);
 }
 
-void klient(void)
+// Główna funkcja klienta
+void klient(int numer_grupy)
 {
     if (signal(SIGTERM, klient_obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
@@ -311,11 +456,17 @@ void klient(void)
     if (signal(SIGUSR1, klient_obsluz_sigusr1) == SIG_ERR)
         LOGE_ERRNO("signal(SIGUSR1)");
 
-    struct Grupa g = inicjalizuj_grupe();
+    struct Grupa g = inicjalizuj_grupe(numer_grupy);
 
     if (g.vip)
     {
         usadz_grupe_vip(&g);
+        if (g.stolik_przydzielony == -1)
+        {
+            // Miejsce VIP niedostępne; powrót do normalnej obsługi kolejki.
+            if (czekaj_na_przydzial_stolika(&g) != 0)
+                exit(0);
+        }
     }
     else
     {
@@ -344,19 +495,21 @@ void klient(void)
     exit(0);
 }
 
+// Główny punkt wejścia
 int main(int argc, char **argv)
 {
-    if (argc != 4)
+    if (argc != 5)
     {
-        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id> <numer_grupy>\n", argv[0]);
         return 1;
     }
 
     int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
     int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
     msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
+    int numer_grupy = parsuj_int_lub_zakoncz("numer_grupy", argv[4]);
     dolacz_ipc(shm, sem);
     zainicjuj_losowosc();
-    klient();
+    klient(numer_grupy);
     return 0;
 }

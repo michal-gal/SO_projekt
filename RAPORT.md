@@ -42,7 +42,7 @@ Uruchamianie testów:
 - Wszystkie testy: `make test` (jeśli cel jest dostępny) albo ręcznie: `bash tests/test_*.sh`
 - Pojedynczy test: np. `bash tests/test_signals.sh`
 
-Każdy test uruchamia `./restauracja` w kontrolowany sposób (z limitami czasu) i sprawdza wybrane własności (np. reakcję na sygnały, brak osieroconych procesów, poprawne sprzątanie IPC). Część testów może korzystać ze zmiennych środowiskowych, np. `RESTAURACJA_DISABLE_MANAGER_CLOSE=1` lub wariantu kompilacji `-DTEST_NO_SLEEP`.
+Każdy test uruchamia `./restauracja` w kontrolowany sposób (z limitami czasu) i sprawdza wybrane własności (np. reakcję na sygnały, brak osieroconych procesów, poprawne sprzątanie IPC). Część testów może korzystać ze zmiennych środowiskowych, np. `RESTAURACJA_DISABLE_MANAGER_CLOSE=1`.
 
 Podsumowanie: wszystkie poniższe testy kończą się wynikiem **OK**.
 
@@ -73,14 +73,6 @@ Podsumowanie: wszystkie poniższe testy kończą się wynikiem **OK**.
 - Przebieg: uruchomienie `./restauracja` (opcjonalnie przez `setsid`), wysłanie `SIGINT`, a następnie sprawdzenie listy procesów.
 - Kryterium zaliczenia: po zakończeniu brak uruchomionych procesów `restauracja/obsluga/kucharz/kierownik/klient` powiązanych z sesją testu.
 - Wynik: **OK**.
-
-### `tests/test_no_sleep.sh` – test bez opóźnień (`TEST_NO_SLEEP`)
-
-- Cel: uruchomienie programu w wariancie testowym, w którym `sleep/nanosleep` nie blokują, aby szybciej wykrywać deadlocki i błędy sterowania.
-- Przebieg: kompilacja z `EXTRA_CFLAGS='-DTEST_NO_SLEEP'`, uruchomienie z krótkim czasem pracy (`RESTAURACJA_CZAS_PRACY`) oraz zablokowanym losowym zamknięciem przez kierownika (`RESTAURACJA_DISABLE_MANAGER_CLOSE=1`).
-- Kryterium zaliczenia: program kończy się sam w zadanym czasie i tworzy niepusty log.
-- Wynik: **OK**.
-- Uwagi: nie tworzą się procesy klientów.
 
 ## Linki do istotnych fragmentów kodu (GitHub)
 

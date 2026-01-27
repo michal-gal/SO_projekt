@@ -1,6 +1,7 @@
 #ifndef LOG_H
 #define LOG_H
 
+// ====== INKLUDY ======
 #include <errno.h>  // errno
 #include <string.h> // strerror
 
@@ -34,6 +35,7 @@ void log_init_from_env(void);
 void log_printf(char level, const char *fmt, ...);
 void log_printf_force_stdio(char level, const char *fmt, ...);
 
+// ====== MAKRA LOGOWANIA ======
 #define LOGI(...)                         \
     do                                    \
     {                                     \
@@ -59,6 +61,14 @@ void log_printf_force_stdio(char level, const char *fmt, ...);
     do                                            \
     {                                             \
         log_printf_force_stdio('I', __VA_ARGS__); \
+    } while (0)
+
+// Ważne zdarzenia procesowe (zawsze widoczne w LOG_LEVEL >= 1)
+#define LOGP(...)                         \
+    do                                    \
+    {                                     \
+        if (LOG_LEVEL >= 1)               \
+            log_printf('P', __VA_ARGS__); \
     } while (0)
 
 #define LOGE_ERRNO(prefix)                           \

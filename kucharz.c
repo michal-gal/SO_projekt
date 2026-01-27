@@ -5,15 +5,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static volatile sig_atomic_t shutdown_requested = 0; // czy został otrzymany SIGTERM
+// Globalna flaga zamknięcia
+static volatile sig_atomic_t shutdown_requested = 0;
 
-static void obsluz_sigterm(int signo) // handler dla SIGTERM
+// Deklaracje wstępne
+static void obsluz_sigterm(int signo);
+static void drukuj_podsumowanie_kuchni(void);
+
+// Handler sygnału SIGTERM
+static void obsluz_sigterm(int signo)
 {
     (void)signo;
     shutdown_requested = 1;
 }
 
-static void drukuj_podsumowanie_kuchni(void) // drukuje podsumowanie kuchni
+// Drukuj podsumowanie kuchni
+static void drukuj_podsumowanie_kuchni(void)
 {
     LOGS("\n=== PODSUMOWANIE KUCHNI ===\n");
     int kuchnia_suma = 0;
@@ -25,21 +32,23 @@ static void drukuj_podsumowanie_kuchni(void) // drukuje podsumowanie kuchni
     LOGS("\nSuma: %d zł\n", kuchnia_suma);
 }
 
-void kucharz(void) // główna funkcja procesu kucharza
+// Główna funkcja kucharza
+void kucharz(void)
 {
+    // Ustaw handler sygnału
     if (signal(SIGTERM, obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
 
     ustaw_shutdown_flag(&shutdown_requested);
 
-    /* Wait for restaurant opening signalled via SEM_TURA instead of busy-waiting.
-       The parent sets `*kolej_podsumowania` and calls `sygnalizuj_ture()`
-       when the restaurant opens, so consume that semaphore token here. */
-    LOGI("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
+    // Czekaj na otwarcie restauracji sygnalizowane przez SEM_TURA zamiast aktywnego czekania.
+    // Rodzic ustawia *kolej_podsumowania i wywołuje sygnalizuj_ture()
+    // gdy restauracja się otwiera, więc zużyj ten token semafora tutaj.
+    LOGD("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
     sem_operacja(SEM_TURA, -1);
-    LOGI("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
+    LOGD("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
 
-    /* After being started, wait for the summary turn (2) or shutdown. */
+    // Po uruchomieniu, czekaj na turę podsumowania (2) lub zamknięcie.
     czekaj_na_ture(2, &shutdown_requested);
 
     drukuj_podsumowanie_kuchni();
@@ -53,7 +62,8 @@ void kucharz(void) // główna funkcja procesu kucharza
     exit(0);
 }
 
-int main(int argc, char **argv) // punkt wejścia procesu kucharza
+// Główny punkt wejścia
+int main(int argc, char **argv)
 {
     if (argc != 4)
     {

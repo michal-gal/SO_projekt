@@ -91,15 +91,11 @@ void log_init_from_env(void) // inicjalizuje logowanie na podstawie zmiennych ś
     log_init_once();
 }
 
-void log_printf(char level, const char *fmt, ...) // loguje komunikat z danym poziomem
+// Wspólna funkcja logowania z va_list
+static void log_vprintf(char level, const char *fmt, va_list ap, int force_stdio)
 {
-    log_init_once();
-
     char msg[3072];
-    va_list ap;
-    va_start(ap, fmt);
     int n = vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
 
     if (n <= 0)
         return;
@@ -160,77 +156,26 @@ void log_printf(char level, const char *fmt, ...) // loguje komunikat z danym po
     if (log_fd >= 0)
         (void)write(log_fd, out, out_len);
 
-    if (log_stdio_enabled)
+    if (force_stdio || log_stdio_enabled)
         (void)write((level == 'E') ? STDERR_FILENO : STDOUT_FILENO, out, out_len);
+}
+
+void log_printf(char level, const char *fmt, ...) // loguje komunikat z danym poziomem
+{
+    log_init_once();
+
+    va_list ap;
+    va_start(ap, fmt);
+    log_vprintf(level, fmt, ap, 0);
+    va_end(ap);
 }
 
 void log_printf_force_stdio(char level, const char *fmt, ...) // loguje zawsze także na stdout/stderr
 {
     log_init_once();
 
-    char msg[3072];
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(msg, sizeof(msg), fmt, ap);
+    log_vprintf(level, fmt, ap, 1);
     va_end(ap);
-
-    if (n <= 0)
-        return;
-
-    size_t msg_len = (size_t)n;
-    if (msg_len >= sizeof(msg))
-        msg_len = sizeof(msg) - 1;
-
-    time_t now = time(NULL);
-    struct tm tm_now;
-    localtime_r(&now, &tm_now);
-
-    char prefix[128];
-    int pn = snprintf(prefix, sizeof(prefix),
-                      "%04d-%02d-%02d %02d:%02d:%02d pid=%d %c ",
-                      tm_now.tm_year + 1900,
-                      tm_now.tm_mon + 1,
-                      tm_now.tm_mday,
-                      tm_now.tm_hour,
-                      tm_now.tm_min,
-                      tm_now.tm_sec,
-                      (int)getpid(),
-                      level);
-    size_t prefix_len = (pn > 0) ? (size_t)pn : 0;
-    if (prefix_len >= sizeof(prefix))
-        prefix_len = sizeof(prefix) - 1;
-
-    size_t leading_nl = 0;
-    if (msg_len > 0 && msg[0] == '\n')
-        leading_nl = 1;
-
-    char out[4096];
-    size_t out_len = 0;
-    if (leading_nl)
-        out[out_len++] = '\n';
-
-    size_t want = prefix_len;
-    if (out_len + want > sizeof(out))
-        want = sizeof(out) - out_len;
-    if (want)
-    {
-        memcpy(out + out_len, prefix, want);
-        out_len += want;
-    }
-
-    const char *msg_body = msg + leading_nl;
-    size_t msg_body_len = msg_len - leading_nl;
-    want = msg_body_len;
-    if (out_len + want > sizeof(out))
-        want = sizeof(out) - out_len;
-    if (want)
-    {
-        memcpy(out + out_len, msg_body, want);
-        out_len += want;
-    }
-
-    if (log_fd >= 0)
-        (void)write(log_fd, out, out_len);
-
-    (void)write((level == 'E') ? STDERR_FILENO : STDOUT_FILENO, out, out_len);
 }

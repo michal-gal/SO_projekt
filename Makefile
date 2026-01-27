@@ -1,5 +1,5 @@
 CC = gcc
-LOG_LEVEL ?= 1
+LOG_LEVEL ?= 0
 
 CFLAGS = -Wall -g
 CFLAGS += -DLOG_LEVEL=$(LOG_LEVEL)
@@ -65,6 +65,5 @@ test: all
 	./tests/test_signals.sh
 	./tests/test_jobcontrol.sh
 	./tests/test_no_orphans.sh
-	./tests/test_no_sleep.sh
 
 .PHONY: all clean test
