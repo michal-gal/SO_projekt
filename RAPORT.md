@@ -12,6 +12,11 @@ Projekt był kompilowany i uruchamiany na następującej konfiguracji:
 - Narzędzia budowania: GNU Make 4.4.1
 - Kompilacja: `make clean && make`
 
+Uruchamianie programu:
+
+- `./restauracja [<liczba_klientow>] [<czas_sekund>] [<log_level>]`
+- Domyślne wartości (gdy nie podano argumentów): 5000 klientów, 30 sekund, log level 1.
+
 ## Założenia projektowe
 
 - Symulacja restauracji w modelu **wieloprocesowym**: proces nadrzędny uruchamia procesy obsługi, kucharza, kierownika oraz wiele procesów klientów.
