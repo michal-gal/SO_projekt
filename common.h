@@ -39,11 +39,19 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 #define MAX_GRUP_NA_STOLIKU 4                         // maksymalna liczba grup na jednym stoliku
 #define TP 10                                         // godzina otwarcia restauracji
 #define TK 22                                         // godzina zamknięcia restauracji
-#define CZAS_PRACY (TK - TP) * 5                      // czas otwarcia restauracji w sekundach
+#ifndef CZAS_PRACY
+#define CZAS_PRACY (TK - TP) * 5 // czas otwarcia restauracji w sekundach
+#endif
+
+extern int czas_pracy_domyslny;
 #define REZERWA_TASMA 50
 #define REZERWA_STOLIKI 5
 #define REZERWA_KOLEJKA 5
+#ifndef MAX_LOSOWYCH_GRUP
 #define MAX_LOSOWYCH_GRUP 5000 // maksymalna liczba losowych grup do wygenerowania
+#endif
+
+extern int max_losowych_grup;
 
 // ====== ZMIENNE GLOBALNE ======
 extern int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
@@ -64,6 +72,7 @@ extern int *klienci_opuscili;            // statystyka: liczba klientów którzy
 extern const int ILOSC_STOLIKOW[4];      // liczba stolików o pojemności 1,2,3,4
 extern const int CENY_DAN[6];            // ceny dań
 extern pid_t pid_obsluga, pid_kucharz, pid_kierownik;
+extern int disable_close; // czy wyłączyć zamykanie restauracji przez kierownika
 // PID-y procesów w pamięci współdzielonej (potrzebne po exec(), np. do wysyłania sygnałów)
 extern pid_t *pid_obsluga_shm;   // wskaźnik na PID procesu obsługi w pamięci współdzielonej
 extern pid_t *pid_kierownik_shm; // wskaźnik na PID procesu kierownika w pamięci współdzielonej
@@ -185,6 +194,11 @@ void kierownik(void);
  * Generator stolików – inicjalizuje tablicę stolików.
  */
 void generator_stolikow(struct Stolik *stoliki);
+
+/**
+ * Funkcja dla kierownika do zamknięcia restauracji.
+ */
+void kierownik_zamknij_restauracje_i_zakoncz_klientow(void);
 
 /**
  * Dodaje danie na taśmę.

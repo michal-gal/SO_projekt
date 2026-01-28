@@ -13,6 +13,9 @@
 #include <time.h>
 #include <unistd.h>
 
+int max_losowych_grup = MAX_LOSOWYCH_GRUP;
+int czas_pracy_domyslny = CZAS_PRACY;
+
 // ====== ZMIENNE GLOBALNE ======
 int shm_id, sem_id;                            // pamięć współdzielona i semafory
 int msgq_id;                                   // kolejka komunikatów
@@ -32,6 +35,8 @@ pid_t pid_obsluga, pid_kucharz, pid_kierownik; // pid-y procesów
 
 pid_t *pid_obsluga_shm;   // wskaźnik na PID procesu obsługi w pamięci współdzielonej
 pid_t *pid_kierownik_shm; // wskaźnik na PID procesu kierownika w pamięci współdzielonej
+
+int disable_close = 0; // czy wyłączyć zamykanie restauracji przez kierownika
 
 const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików o pojemności 1,2,3,4
 const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań
@@ -598,4 +603,10 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         }
     }
     LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n", (int)getpid());
+}
+
+// Funkcja dla kierownika do zamknięcia restauracji
+void kierownik_zamknij_restauracje_i_zakoncz_klientow(void)
+{
+    *restauracja_otwarta = 0;
 }

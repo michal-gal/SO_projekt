@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // Globalna flaga zamknięcia
 static volatile sig_atomic_t shutdown_requested = 0;
@@ -30,6 +31,8 @@ static void drukuj_podsumowanie_kuchni(void)
         kuchnia_suma += kuchnia_dania_wydane[i] * CENY_DAN[i];
     }
     LOGS("\nSuma: %d zł\n", kuchnia_suma);
+
+    fsync(STDOUT_FILENO); // Ensure all summary logs are flushed
 }
 
 // Główna funkcja kucharza
@@ -59,6 +62,8 @@ void kucharz(void)
     *kolej_podsumowania = 3;
     sygnalizuj_ture();
 
+    fsync(STDOUT_FILENO); // Ensure logs are flushed
+    sleep(2);             // Give time for logs to be printed
     exit(0);
 }
 

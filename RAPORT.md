@@ -16,13 +16,13 @@ Projekt był kompilowany i uruchamiany na następującej konfiguracji:
 
 - Symulacja restauracji w modelu **wieloprocesowym**: proces nadrzędny uruchamia procesy obsługi, kucharza, kierownika oraz wiele procesów klientów.
 - Współdzielenie stanu przez **System V IPC**: pamięć dzielona + semafory; kolejka komunikatów jako kolejka wejściowa klientów.
-- Program ma poprawnie reagować na przerwania z terminala (Ctrl+C/Ctrl+\) oraz umożliwiać stop/wznów (Ctrl+Z/fg) i domykać zasoby IPC.
-- Logi wyświetlane na konsoli są łatwe do wyciszenia i nie mogą być wykonywane w sekcjach krytycznych (pod semaforami / w newralgicznych pętlach IPC).
+- Program ma poprawnie reagować na przerwania z terminala (Ctrl+C / Ctrl+\), umożliwiać stop/wznów (SIGTSTP/SIGCONT) i sprzątać zasoby IPC.
+- Logi na konsoli można łatwo wyciszyć; logowanie nie odbywa się w sekcjach krytycznych (pod semaforami / w newralgicznych pętlach IPC).
 
 ## Ogólny opis kodu
 
 - `restauracja.c`: główny proces – tworzy IPC, uruchamia dzieci przez fork/exec, zarządza grupą procesów, forwarduje sygnały job-control, na końcu sprząta IPC.
-- `common.c`: wspólne API dla IPC (shm/semafory/msgq), generator stolików, funkcje pomocnicze synchronizacji i porządkowania.
+- `common.c`: wspólne API dla IPC (shm/semafory/msgq), generator stolików, funkcje pomocnicze synchronizacji i sprzątania.
 - `klient.c` / `obsluga.c` / `kucharz.c` / `kierownik.c`: logika ról + łagodna obsługa SIGTERM.
 - `log.c` + `log.h`: wspólny logger (`LOGI/LOGD/LOGE`), poziomy logowania, zapis do pliku, prefiks czasu/PID/poziomu.
 
@@ -39,7 +39,7 @@ W repozytorium znajduje się zestaw prostych testów w `tests/` (bash), które b
 
 Uruchamianie testów:
 
-- Wszystkie testy: `make test` (jeśli cel jest dostępny) albo ręcznie: `bash tests/test_*.sh`
+- Wszystkie testy: `make test` (jeśli cel jest dostępny) lub ręcznie: `bash tests/test_*.sh`
 - Pojedynczy test: np. `bash tests/test_signals.sh`
 
 Każdy test uruchamia `./restauracja` w kontrolowany sposób (z limitami czasu) i sprawdza wybrane własności (np. reakcję na sygnały, brak osieroconych procesów, poprawne sprzątanie IPC). Część testów może korzystać ze zmiennych środowiskowych, np. `RESTAURACJA_DISABLE_MANAGER_CLOSE=1`.

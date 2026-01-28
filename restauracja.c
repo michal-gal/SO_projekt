@@ -14,6 +14,8 @@
 #include <unistd.h>
 #include <pthread.h>
 
+extern int current_log_level;
+
 // ====== ZMIENNE GLOBALNE ======
 
 static char arg_shm[32];
@@ -239,11 +241,51 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 }
 
 // ====== MAIN ======
-int main(void)
+int main(int argc, char **argv)
 {
+    // Parsowanie argumentów
+    if (argc != 4) {
+        fprintf(stderr, "Użycie: %s <liczba_klientow> <czas_sekund> <log_level>\n", argv[0]);
+        return 1;
+    }
+
+    // Parsuj liczbę klientów
+    errno = 0;
+    char *end = NULL;
+    long val = strtol(argv[1], &end, 10);
+    if (errno != 0 || end == argv[1] || *end != '\0' || val <= 0) {
+        fprintf(stderr, "Błędna liczba klientów: %s\n", argv[1]);
+        return 1;
+    }
+    max_losowych_grup = (int)val;
+
+    // Parsuj czas w sekundach
+    errno = 0;
+    end = NULL;
+    val = strtol(argv[2], &end, 10);
+    if (errno != 0 || end == argv[2] || *end != '\0' || val <= 0) {
+        fprintf(stderr, "Błędny czas w sekundach: %s\n", argv[2]);
+        return 1;
+    }
+    czas_pracy_domyslny = (int)val;
+
+    // Parsuj log level
+    errno = 0;
+    end = NULL;
+    val = strtol(argv[3], &end, 10);
+    if (errno != 0 || end == argv[3] || *end != '\0' || val < 0 || val > 2) {
+        fprintf(stderr, "Błędny log level (0-2): %s\n", argv[3]);
+        return 1;
+    }
+    current_log_level = (int)val;
+    // Ustaw zmienną środowiskową dla procesów potomnych
+    char log_level_str[2];
+    snprintf(log_level_str, sizeof(log_level_str), "%d", (int)val);
+    setenv("LOG_LEVEL", log_level_str, 1);
+
     zainicjuj_losowosc();
 
-    int czas_pracy = CZAS_PRACY; // domyślny czas pracy restauracji w sekundach
+    int czas_pracy = czas_pracy_domyslny; // domyślny czas pracy restauracji w sekundach
     const char *czas_env = getenv("RESTAURACJA_CZAS_PRACY");
     if (czas_env && *czas_env)
     {
@@ -311,6 +353,11 @@ int main(void)
             max_aktywnych_klientow = (int)v;
     }
 
+    // Ustaw disable_close z env
+    const char *disable_env = getenv("RESTAURACJA_DISABLE_MANAGER_CLOSE");
+    if (disable_env && strcmp(disable_env, "1") == 0)
+        disable_close = 1;
+
     /* uruchom wątek zbierający zombie w tle */
     /* USUNIĘTY: watek_zombie powoduje wyścig z waitpid w głównej pętli */
     /*
@@ -318,7 +365,7 @@ int main(void)
         LOGE_ERRNO("pthread_create(zombie)");
     */
     int aktywni_klienci = 0;
-    int liczba_utworzonych_grup = MAX_LOSOWYCH_GRUP; // liczba grup do utworzenia
+    int liczba_utworzonych_grup = max_losowych_grup; // liczba grup do utworzenia
     /* Interwał (sekundy) między budzeniem kierownika poprzez SEM_KIEROWNIK. */
     int kierownik_interval = 30;
     const char *kier_env = getenv("RESTAURACJA_KIEROWNIK_INTERVAL");
@@ -406,6 +453,16 @@ int main(void)
     LOGD("restauracja: pid=%d set kolej_podsumowania=1, signaling SEM_TURA\n", (int)getpid());
     sygnalizuj_ture();
 
+    // Daj czas na wydrukowanie podsumowań (obsługa -> kucharz -> kierownik).
+    time_t podsumowanie_start = time(NULL);
+    while (*kolej_podsumowania != 3 && time(NULL) - podsumowanie_start < 3)
+    {
+        struct timespec req = {.tv_sec = 0, .tv_nsec = 100 * 1000 * 1000}; // 100ms
+        (void)rest_nanosleep(&req, NULL);
+    }
+    struct timespec req = {.tv_sec = 0, .tv_nsec = 200 * 1000 * 1000}; // 200ms
+    (void)rest_nanosleep(&req, NULL);
+
     LOGD("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
 
     // Dodatkowo: ubij klientów i wyczyść stoliki/kolejkę, żeby nie zostawić
@@ -418,12 +475,6 @@ int main(void)
     LOGD("restauracja: pid=%d calling zakoncz_wszystkie_dzieci()\n", (int)getpid());
     zakoncz_wszystkie_dzieci(&status);
     LOGD("restauracja: pid=%d returned from zakoncz_wszystkie_dzieci()\n", (int)getpid());
-
-    /* zatrzymaj wątek zbierający zombie i połącz go */
-    /* USUNIĘTY: watek_zombie
-    (void)pthread_kill(t_zombie, SIGTERM);
-    (void)pthread_join(t_zombie, NULL);
-    */
 
     LOGD("restauracja: pid=%d removing IPC resources shm=%d sem=%d msgq=%d\n", (int)getpid(), shm_id, sem_id, msgq_id);
     shmctl(shm_id, IPC_RMID, NULL); // usuń pamięć współdzieloną

@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // Global variables for performance and shutdown
 static volatile sig_atomic_t obsluga_wydajnosc = 2; // 1=slow, 2=normal, 4=fast
@@ -13,6 +14,7 @@ static volatile sig_atomic_t shutdown_requested = 0;
 // Forward declarations
 static void obsluga_podaj_dania_normalne(double wydajnosc);
 static void *watek_specjalne(void *arg);
+static void *watek_podsumowanie(void *arg);
 static void obsluz_sygnal(int signo);
 static void wypisz_podsumowanie(void);
 
@@ -49,7 +51,7 @@ static void *watek_kolejki(void *arg)
 
             if (usadzono)
             {
-                LOGS("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
+                LOGP("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
                      group_num, numer_stolika, zajete, pojemnosc);
                 (*klienci_przyjeci)++;
                 if (g.proces_id > 0)
@@ -78,11 +80,11 @@ static void *watek_podawania(void *arg)
         if (biezaca_wydajnosc != ostatnia_wydajnosc)
         {
             if (biezaca_wydajnosc >= 4)
-                LOGS("Zwiększona wydajność obsługi (SIGUSR1)!\n");
+                LOGP("Zwiększona wydajność obsługi (SIGUSR1)!\n");
             else if (biezaca_wydajnosc <= 1)
-                LOGS("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
+                LOGP("Zmniejszona wydajność obsługi (SIGUSR2)!\n");
             else
-                LOGS("Restauracja działa normalnie.\n");
+                LOGP("Restauracja działa normalnie.\n");
             ostatnia_wydajnosc = biezaca_wydajnosc;
         }
 
@@ -136,7 +138,7 @@ static void *watek_specjalne(void *arg)
                 kuchnia_dania_wydane[idx]++;
             pthread_mutex_unlock(&tasma_sync->mutex);
 
-            LOGS("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
+            LOGP("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
                  spec_ceny[i], spec_numer_stolika[i]);
         }
 
@@ -156,6 +158,37 @@ static void *watek_specjalne(void *arg)
         (void)rest_nanosleep(&req, NULL);
     }
 
+    return NULL;
+}
+
+// Thread for printing summary at the end
+static void *watek_podsumowanie(void *arg)
+{
+    (void)arg;
+    static volatile sig_atomic_t ignore_shutdown = 0;
+    static volatile sig_atomic_t already_printed = 0;
+
+    czekaj_na_ture(1, &ignore_shutdown);
+
+    while (*restauracja_otwarta)
+    {
+        struct timespec req = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000}; // 50ms
+        (void)rest_nanosleep(&req, NULL);
+    }
+
+    if (already_printed)
+        return NULL;
+
+    if (pid_obsluga_shm && *pid_obsluga_shm != getpid())
+        return NULL;
+
+    already_printed = 1;
+    wypisz_podsumowanie();
+
+    *kolej_podsumowania = 2;
+    sygnalizuj_ture();
+
+    fsync(STDOUT_FILENO); // Ensure logs are flushed
     return NULL;
 }
 
@@ -233,6 +266,8 @@ static void wypisz_podsumowanie(void)
 
     LOGS("\n\nObsługa kończy pracę.\n");
     LOGS("======================\n");
+
+    fsync(STDOUT_FILENO); // Ensure all summary logs are flushed
 }
 
 // Main service function
@@ -253,13 +288,15 @@ void obsluga(void)
     ustaw_shutdown_flag(&shutdown_requested);
 
     // Create threads
-    pthread_t t_kolejka, t_podawanie, t_specjalne;
+    pthread_t t_kolejka, t_podawanie, t_specjalne, t_podsumowanie;
     if (pthread_create(&t_kolejka, NULL, watek_kolejki, NULL) != 0)
         LOGE_ERRNO("pthread_create(kolejka)");
     if (pthread_create(&t_podawanie, NULL, watek_podawania, NULL) != 0)
         LOGE_ERRNO("pthread_create(podawanie)");
     if (pthread_create(&t_specjalne, NULL, watek_specjalne, NULL) != 0)
         LOGE_ERRNO("pthread_create(specjalne)");
+    if (pthread_create(&t_podsumowanie, NULL, watek_podsumowanie, NULL) != 0)
+        LOGE_ERRNO("pthread_create(podsumowanie)");
 
     // Wait while restaurant is open
     while (*restauracja_otwarta && !shutdown_requested)
@@ -277,15 +314,9 @@ void obsluga(void)
     (void)pthread_join(t_podawanie, NULL);
     (void)pthread_join(t_specjalne, NULL);
 
-    // Wait for all groups to finish
-    czekaj_na_ture(1, &shutdown_requested);
-
-    // Print summary
-    wypisz_podsumowanie();
-
-    *kolej_podsumowania = 2;
-    sygnalizuj_ture();
-
+    // Wait for summary thread to finish
+    (void)pthread_join(t_podsumowanie, NULL);
+    sleep(2); // Give time for logs to be printed
     exit(0);
 }
 

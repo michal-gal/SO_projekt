@@ -51,19 +51,20 @@ static void kierownik_wyslij_sygnal(void)
         }
         // LOGI("Kierownik wysyła SIGUSR2 do obsługi (PID %d)\n", pid_obsl);
     }
-    // else if (random_value == 3) // ~0.0001% chance to close restaurant
-    // {
-    //     if (!disable_close)
-    //     {
-    //         kierownik_zamknij_restauracje_i_zakoncz_klientow();
-    //         LOGI("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
-    //     }
-    //     else
-    //     {
-    //         LOGI("Kierownik: zamykanie wyłączone (RESTAURACJA_DISABLE_MANAGER_CLOSE=1)\n");
-    //     }
-    // }
-    else
+    else if (random_value == 3) // ~0.0001% chance to close restaurant
+    {
+        if (!disable_close)
+        {
+            kierownik_zamknij_restauracje_i_zakoncz_klientow();
+            LOGI("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
+        }
+        else
+        {
+            LOGI("Kierownik: zamykanie wyłączone (RESTAURACJA_DISABLE_MANAGER_CLOSE=1)\n");
+        }
+    }
+    // // }
+    // else
     {
         // No action
     }
@@ -98,7 +99,10 @@ void kierownik(void)
 
     czekaj_na_ture(3, &shutdown_requested);
 
-    LOGI("Kierownik kończy pracę.\n");
+    LOGS("Kierownik kończy pracę.\n");
+
+    fsync(STDOUT_FILENO); // Ensure logs are flushed
+    sleep(2);             // Give time for logs to be printed
     exit(0);
 }
 

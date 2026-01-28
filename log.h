@@ -7,9 +7,9 @@
 
 // ====== LOGOWANIE ======
 // Poziomy (compile-time):
-// - 0 = tylko błędy/podsumowania (LOGI/LOGD wyciszone)
-// - 1 = logi informacyjne (domyślnie)
-// - 2 = logi debug
+// - 0 = tylko podsumowania (LOGI/LOGD/LOGE wyciszone)
+// - 1 = tylko podsumowania (jak poprzednie LOG_LEVEL=0)
+// - 2 = błędy i podsumowania (jak poprzednie LOG_LEVEL=1)
 //
 // Format wpisu (prefiks dodawany automatycznie do LOGI/LOGD/LOGE):
 //   YYYY-MM-DD HH:MM:SS pid=<pid> <LEVEL> <wiadomość>
@@ -27,6 +27,8 @@
 #define LOG_LEVEL 1
 #endif
 
+extern int current_log_level;
+
 // Logger zapisuje do pliku, jeśli ustawisz zmienną środowiskową:
 //   RESTAURACJA_LOG_FILE=/tmp/restauracja.log
 // Domyślnie logi nadal trafiają też na stdout/stderr. Żeby to wyłączyć:
@@ -39,21 +41,22 @@ void log_printf_force_stdio(char level, const char *fmt, ...);
 #define LOGI(...)                         \
     do                                    \
     {                                     \
-        if (LOG_LEVEL >= 1)               \
+        if (current_log_level >= 3)       \
             log_printf('I', __VA_ARGS__); \
     } while (0)
 
 #define LOGD(...)                         \
     do                                    \
     {                                     \
-        if (LOG_LEVEL >= 2)               \
+        if (current_log_level >= 3)       \
             log_printf('D', __VA_ARGS__); \
     } while (0)
 
-#define LOGE(...)                     \
-    do                                \
-    {                                 \
-        log_printf('E', __VA_ARGS__); \
+#define LOGE(...)                         \
+    do                                    \
+    {                                     \
+        if (current_log_level >= 2)       \
+            log_printf('E', __VA_ARGS__); \
     } while (0)
 
 // Podsumowania/komunikaty krytyczne: drukuj zawsze, niezależnie od LOG_LEVEL i RESTAURACJA_LOG_STDIO.
@@ -63,11 +66,11 @@ void log_printf_force_stdio(char level, const char *fmt, ...);
         log_printf_force_stdio('I', __VA_ARGS__); \
     } while (0)
 
-// Ważne zdarzenia procesowe (zawsze widoczne w LOG_LEVEL >= 1)
+// Ważne zdarzenia procesowe (widoczne w LOG_LEVEL >= 1)
 #define LOGP(...)                         \
     do                                    \
     {                                     \
-        if (LOG_LEVEL >= 1)               \
+        if (current_log_level >= 1)       \
             log_printf('P', __VA_ARGS__); \
     } while (0)
 

@@ -9,6 +9,8 @@
 #include <time.h>
 #include <unistd.h>
 
+int current_log_level = LOG_LEVEL;
+
 static int log_fd = -1;
 static int log_inited = 0;
 static int log_stdio_enabled = 1;
@@ -88,6 +90,17 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
 
 void log_init_from_env(void) // inicjalizuje logowanie na podstawie zmiennych środowiskowych
 {
+    // Czytaj LOG_LEVEL z env
+    const char *log_level_env = getenv("LOG_LEVEL");
+    if (log_level_env) {
+        errno = 0;
+        char *end = NULL;
+        long val = strtol(log_level_env, &end, 10);
+        if (errno == 0 && end && *end == '\0' && val >= 0 && val <= 2) {
+            current_log_level = (int)val;
+        }
+    }
+
     log_init_once();
 }
 

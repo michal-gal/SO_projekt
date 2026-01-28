@@ -27,8 +27,8 @@ typedef struct
     int is_adult;
     int *shared_dania_pobrane;
     int *dania_do_pobrania_ptr;
-    time_t *czas_start_dania_ptr;
-    int timeout_dania;
+    struct timespec *czas_start_dania_ptr;
+    int timeout_dania_ms;
 } PersonArg;
 
 // ====== ZMIENNE GLOBALNE ======
@@ -46,8 +46,8 @@ static void klient_obsluz_sigusr1(int signo);
 static struct Grupa inicjalizuj_grupe(int numer_grupy);
 static void usadz_grupe_vip(struct Grupa *g);
 static int czekaj_na_przydzial_stolika(struct Grupa *g);
-static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, time_t *czas_start_dania, int timeout_dania);
-static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania);
+static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, struct timespec *czas_start_dania, int timeout_dania_ms);
+static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, struct timespec *czas_start_dania);
 static void zaplac_za_dania(const struct Grupa *g);
 static void opusc_stolik(const struct Grupa *g);
 static void petla_czekania_na_dania(struct Grupa *g);
@@ -64,6 +64,13 @@ static void klient_obsluz_sigterm(int signo)
 static void klient_obsluz_sigusr1(int signo)
 {
     (void)signo;
+}
+
+static long diff_ms(const struct timespec *start, const struct timespec *end)
+{
+    long sec = end->tv_sec - start->tv_sec;
+    long nsec = end->tv_nsec - start->tv_nsec;
+    return sec * 1000 + nsec / 1000000;
 }
 
 // Inicjalizuj grupę klientów
@@ -130,7 +137,7 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
     sigprocmask(SIG_BLOCK, &block_set, &old_set);
 
     kolejka_dodaj(*g);
-    LOGS("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
+    LOGP("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
          g->numer_grupy,
          g->osoby,
          g->dorosli,
@@ -179,9 +186,11 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
 }
 
 // Zamów specjalne jeśli trzeba
-static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, time_t *czas_start_dania, int timeout_dania)
+static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania, struct timespec *czas_start_dania, int timeout_dania_ms)
 {
-    if (time(NULL) - *czas_start_dania <= timeout_dania)
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (diff_ms(czas_start_dania, &now) <= timeout_dania_ms)
         return;
     if (g->danie_specjalne != 0)
         return;
@@ -203,7 +212,7 @@ static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania
     pthread_mutex_unlock(&stoliki_sync->mutex);
 
     LOGI("Grupa %d zamawia danie specjalne za: %d zł. \n", g->numer_grupy, g->danie_specjalne);
-    *czas_start_dania = time(NULL);
+    clock_gettime(CLOCK_MONOTONIC, czas_start_dania);
 }
 
 // Wątek osoby
@@ -212,7 +221,7 @@ static void *person_thread(void *arg)
     PersonArg *pa = (PersonArg *)arg;
     struct Grupa *g = pa->g;
     int local_is_lead = pa->is_lead;
-    int timeout = pa->timeout_dania;
+    int timeout = pa->timeout_dania_ms;
 
     for (;;)
     {
@@ -242,7 +251,7 @@ static void *person_thread(void *arg)
 }
 
 // Spróbuj pobrać danie
-static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, time_t *czas_start_dania)
+static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobrane, int dania_do_pobrania, struct timespec *czas_start_dania)
 {
     int log_pobrano = 0;
     int log_cena = 0;
@@ -298,7 +307,7 @@ static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobra
         if (tasma_sync->count > 0)
             tasma_sync->count--;
         pthread_cond_signal(&tasma_sync->not_full);
-        *czas_start_dania = time(NULL);
+        clock_gettime(CLOCK_MONOTONIC, czas_start_dania);
         pthread_mutex_unlock(&tasma_sync->mutex);
 
         if (log_pobrano)
@@ -388,7 +397,7 @@ static void opusc_stolik(const struct Grupa *g)
     pthread_mutex_unlock(&stoliki_sync->mutex);
 
     (*klienci_opuscili)++;
-    LOGS("Grupa %d przy stoliku %d opuszcza restaurację.\n", log_pid, log_numer_stolika);
+    LOGP("Grupa %d przy stoliku %d opuszcza restaurację.\n", log_pid, log_numer_stolika);
 }
 
 // Pętla czekania na dania
@@ -401,8 +410,9 @@ static void petla_czekania_na_dania(struct Grupa *g)
 
     int dania_do_pobrania = rand() % 8 + 3;
     int shared_dania_pobrane = 0;
-    time_t czas_start_dania = time(NULL);
-    int timeout_dania = 1;
+    struct timespec czas_start_dania;
+    clock_gettime(CLOCK_MONOTONIC, &czas_start_dania);
+    int timeout_dania_ms = 10;
 
     int persons = g->osoby;
     pthread_t *threads = calloc(persons, sizeof(pthread_t));
@@ -426,7 +436,7 @@ static void petla_czekania_na_dania(struct Grupa *g)
         pa->shared_dania_pobrane = &shared_dania_pobrane;
         pa->dania_do_pobrania_ptr = &dania_do_pobrania;
         pa->czas_start_dania_ptr = &czas_start_dania;
-        pa->timeout_dania = timeout_dania;
+        pa->timeout_dania_ms = timeout_dania_ms;
 
         if (pthread_create(&threads[i], NULL, person_thread, pa) != 0)
         {
