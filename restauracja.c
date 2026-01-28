@@ -243,44 +243,72 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 // ====== MAIN ======
 int main(int argc, char **argv)
 {
-    // Parsowanie argumentów
-    if (argc != 4) {
-        fprintf(stderr, "Użycie: %s <liczba_klientow> <czas_sekund> <log_level>\n", argv[0]);
+    // Domyślne wartości
+    int default_klienci = 5000;
+    int default_czas = 30;
+    int default_log = 1;
+
+    // Parsowanie argumentów (opcjonalne)
+    if (argc < 1 || argc > 4)
+    {
+        fprintf(stderr, "Użycie: %s [<liczba_klientow>] [<czas_sekund>] [<log_level>]\n", argv[0]);
+        fprintf(stderr, "Domyślne: %d klientów, %d sekund, log level %d\n", default_klienci, default_czas, default_log);
         return 1;
     }
 
-    // Parsuj liczbę klientów
-    errno = 0;
-    char *end = NULL;
-    long val = strtol(argv[1], &end, 10);
-    if (errno != 0 || end == argv[1] || *end != '\0' || val <= 0) {
-        fprintf(stderr, "Błędna liczba klientów: %s\n", argv[1]);
-        return 1;
-    }
-    max_losowych_grup = (int)val;
+    // Ustaw domyślne
+    int klienci = default_klienci;
+    int czas = default_czas;
+    int log_level = default_log;
 
-    // Parsuj czas w sekundach
-    errno = 0;
-    end = NULL;
-    val = strtol(argv[2], &end, 10);
-    if (errno != 0 || end == argv[2] || *end != '\0' || val <= 0) {
-        fprintf(stderr, "Błędny czas w sekundach: %s\n", argv[2]);
-        return 1;
+    // Parsuj podane argumenty
+    if (argc >= 2)
+    {
+        errno = 0;
+        char *end = NULL;
+        long val = strtol(argv[1], &end, 10);
+        if (errno != 0 || end == argv[1] || *end != '\0' || val <= 0)
+        {
+            fprintf(stderr, "Błędna liczba klientów: %s\n", argv[1]);
+            return 1;
+        }
+        klienci = (int)val;
     }
-    czas_pracy_domyslny = (int)val;
 
-    // Parsuj log level
-    errno = 0;
-    end = NULL;
-    val = strtol(argv[3], &end, 10);
-    if (errno != 0 || end == argv[3] || *end != '\0' || val < 0 || val > 2) {
-        fprintf(stderr, "Błędny log level (0-2): %s\n", argv[3]);
-        return 1;
+    if (argc >= 3)
+    {
+        errno = 0;
+        char *end = NULL;
+        long val = strtol(argv[2], &end, 10);
+        if (errno != 0 || end == argv[2] || *end != '\0' || val <= 0)
+        {
+            fprintf(stderr, "Błędny czas w sekundach: %s\n", argv[2]);
+            return 1;
+        }
+        czas = (int)val;
     }
-    current_log_level = (int)val;
+
+    if (argc >= 4)
+    {
+        errno = 0;
+        char *end = NULL;
+        long val = strtol(argv[3], &end, 10);
+        if (errno != 0 || end == argv[3] || *end != '\0' || val < 0 || val > 2)
+        {
+            fprintf(stderr, "Błędny log level (0-2): %s\n", argv[3]);
+            return 1;
+        }
+        log_level = (int)val;
+    }
+
+    // Ustaw zmienne
+    max_losowych_grup = klienci;
+    czas_pracy_domyslny = czas;
+    current_log_level = log_level;
+
     // Ustaw zmienną środowiskową dla procesów potomnych
     char log_level_str[2];
-    snprintf(log_level_str, sizeof(log_level_str), "%d", (int)val);
+    snprintf(log_level_str, sizeof(log_level_str), "%d", log_level);
     setenv("LOG_LEVEL", log_level_str, 1);
 
     zainicjuj_losowosc();
