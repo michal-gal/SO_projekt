@@ -210,6 +210,8 @@ static void zamow_specjalne_jesli_trzeba(struct Grupa *g, int *dania_do_pobrania
         }
     }
     pthread_mutex_unlock(&stoliki_sync->mutex);
+    /* Powiadom obsługę, że zamówiono danie specjalne (unikamy polling) */
+    (void)pthread_cond_signal(&stoliki_sync->cond);
 
     LOGI("Grupa %d zamawia danie specjalne za: %d zł. \n", g->numer_grupy, g->danie_specjalne);
     clock_gettime(CLOCK_MONOTONIC, czas_start_dania);
@@ -396,7 +398,8 @@ static void opusc_stolik(const struct Grupa *g)
     }
     pthread_mutex_unlock(&stoliki_sync->mutex);
 
-    (*klienci_opuscili)++;
+    /* Zliczamy opuszczających klientów (osoby), nie tylko grupy. */
+    (*klienci_opuscili) += g->osoby;
     LOGP("Grupa %d przy stoliku %d opuszcza restaurację.\n", log_pid, log_numer_stolika);
 }
 

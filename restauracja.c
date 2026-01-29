@@ -1,5 +1,9 @@
 #include "restauracja.h"
 
+#ifndef CLIENTS_TO_CREATE
+#define CLIENTS_TO_CREATE 10
+#endif
+
 #include <errno.h>
 #include <signal.h>
 #include <sched.h>
@@ -149,8 +153,9 @@ static int czy_grupa_procesow_pusta(pid_t pgid) // sprawdza, czy grupa procesów
 
 static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy potomne w grupie
 {
-    const int timeout_term = 8;
-    const int timeout_kill = 3;
+    /* Keep total wait time below typical test timeout (10s). */
+    const int timeout_term = SHUTDOWN_TERM_TIMEOUT;
+    const int timeout_kill = SHUTDOWN_KILL_TIMEOUT;
 
     LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
     if (children_pgid > 0)
@@ -199,7 +204,11 @@ static pid_t generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grup
     if (pid < 0)
     {
         if (restauracja_otwarta)
+        {
             *restauracja_otwarta = 0;
+            if (stoliki_sync)
+                (void)pthread_cond_broadcast(&stoliki_sync->cond);
+        }
         return -1;
     }
     if (children_pgid > 0)
@@ -213,7 +222,11 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 {
     // Błąd fork() nie powinien zostawiać osieroconych procesów/IPC.
     if (restauracja_otwarta)
+    {
         *restauracja_otwarta = 0;
+        if (stoliki_sync)
+            (void)pthread_cond_broadcast(&stoliki_sync->cond);
+    }
     if (kolej_podsumowania)
     {
         *kolej_podsumowania = 1;
@@ -244,8 +257,8 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 int main(int argc, char **argv)
 {
     // Domyślne wartości
-    int default_klienci = 5000;
-    int default_czas = 30;
+    int default_klienci = CLIENTS_TO_CREATE;
+    int default_czas = 10;
     int default_log = 1;
 
     // Parsowanie argumentów (opcjonalne)
@@ -312,6 +325,8 @@ int main(int argc, char **argv)
     setenv("LOG_LEVEL", log_level_str, 1);
 
     zainicjuj_losowosc();
+
+    int zforkowane_grupy = 0; // licznik zforkowanych grup klientów
 
     int czas_pracy = czas_pracy_domyslny; // domyślny czas pracy restauracji w sekundach
     const char *czas_env = getenv("RESTAURACJA_CZAS_PRACY");
@@ -439,17 +454,17 @@ int main(int argc, char **argv)
         if (pid > 0)
         {
             aktywni_klienci++;
+            zforkowane_grupy++; // zwiększ licznik zforkowanych grup
         }
         if (liczba_utworzonych_grup == 0)
         {
             printf("Utworzono wszystkie grupy klientów.\n");
-            sleep(3); // daj chwilę na przetworzenie
         }
     };
-    // symulacja pracy restauracji przez 50 sekund (bez sleep)
+    // symulacja pracy restauracji przez SIMULATION_SECONDS_DEFAULT sekund (bez sleep)
     {
         time_t sim_start = time(NULL);
-        while (time(NULL) - sim_start < 50 && !sigint_requested)
+        while (time(NULL) - sim_start < SIMULATION_SECONDS_DEFAULT && !sigint_requested)
         {
             /* Okresowo budź kierownika podczas symulacji również. */
             if (kierownik_interval > 0 && time(NULL) - last_kierownik_post >= kierownik_interval)
@@ -470,6 +485,8 @@ int main(int argc, char **argv)
          (int)getpid(), koniec_czasu, przerwano_sygnalem, zamknieto_flaga, (int)shutdown_signal);
 
     *restauracja_otwarta = 0; // zamknij restaurację
+    if (stoliki_sync)
+        (void)pthread_cond_broadcast(&stoliki_sync->cond);
     if (przerwano_sygnalem)
         LOGS("\n===Przerwano pracę restauracji (%s)!===\n", nazwa_sygnalu((int)shutdown_signal));
     else if (zamknieto_flaga)
@@ -483,12 +500,12 @@ int main(int argc, char **argv)
 
     // Daj czas na wydrukowanie podsumowań (obsługa -> kucharz -> kierownik).
     time_t podsumowanie_start = time(NULL);
-    while (*kolej_podsumowania != 3 && time(NULL) - podsumowanie_start < 3)
+    while (*kolej_podsumowania != 3 && time(NULL) - podsumowanie_start < SUMMARY_WAIT_SECONDS)
     {
-        struct timespec req = {.tv_sec = 0, .tv_nsec = 100 * 1000 * 1000}; // 100ms
+        struct timespec req = {.tv_sec = 0, .tv_nsec = POLL_MS_MED * NSEC_PER_MSEC};
         (void)rest_nanosleep(&req, NULL);
     }
-    struct timespec req = {.tv_sec = 0, .tv_nsec = 200 * 1000 * 1000}; // 200ms
+    struct timespec req = {.tv_sec = 0, .tv_nsec = POLL_MS_LONG * NSEC_PER_MSEC};
     (void)rest_nanosleep(&req, NULL);
 
     LOGD("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
@@ -512,9 +529,9 @@ int main(int argc, char **argv)
     LOGD("restauracja: pid=%d IPC resources removed\n", (int)getpid());
 
     LOGS("\n=== STATYSTYKI KLIENTÓW ===\n");
-    LOGS("Klienci w kolejce: %d\n", *klienci_w_kolejce);
     LOGS("Klienci przyjęci: %d\n", *klienci_przyjeci);
     LOGS("Klienci którzy opuścili restaurację: %d\n", *klienci_opuscili);
+    LOGS("Klienci w kolejce: %d\n", *klienci_w_kolejce);
     LOGS("===========================\n");
 
     LOGS("Program zakończony.\n");

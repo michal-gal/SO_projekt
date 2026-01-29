@@ -63,7 +63,6 @@ void kucharz(void)
     sygnalizuj_ture();
 
     fsync(STDOUT_FILENO); // Ensure logs are flushed
-    sleep(2);             // Give time for logs to be printed
     exit(0);
 }
 

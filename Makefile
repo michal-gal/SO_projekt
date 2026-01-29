@@ -1,14 +1,21 @@
 CC = gcc
+
+# Build-time configurable values (override on make command line):
+#   make CLIENTS_TO_CREATE=500 ...
+# Backwards-compatible: `LICZBA_GRUP` mirrors `CLIENTS_TO_CREATE` unless set explicitly.
 LOG_LEVEL ?= 1
-LICZBA_GRUP ?= 5000
+CLIENTS_TO_CREATE ?= 1000
+LICZBA_GRUP ?= $(CLIENTS_TO_CREATE)
 CZAS_PRACY_SEKUNDY ?= 10
 
+# Compiler/linker flags
 CFLAGS = -Wall -g
 CFLAGS += -DLOG_LEVEL=$(LOG_LEVEL)
-CFLAGS += -DMAX_LOSOWYCH_GRUP=$(LICZBA_GRUP)
+CFLAGS += # MAX_LOSOWYCH_GRUP and CLIENTS_TO_CREATE are controlled at runtime via program arguments
 CFLAGS += -DCZAS_PRACY=$(CZAS_PRACY_SEKUNDY)
 CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread
+
 TARGET = restauracja
 PROCS = klient obsluga kucharz kierownik
 HEADERS = common.h restauracja.h log.h
@@ -71,3 +78,13 @@ test: all
 	./tests/test_no_orphans.sh
 
 .PHONY: all clean test
+
+help:
+	@echo "Usage: make [VAR=value]"
+	@echo "Variables you can override:"
+	@echo "  CLIENTS_TO_CREATE   - (removed) use program args instead: ./restauracja <clients> <time> <log>"
+	@echo "  LICZBA_GRUP         - (removed) alias; use runtime client count as first arg"
+	@echo "  CZAS_PRACY_SEKUNDY  - default working time passed to program at compile-time (default=$(CZAS_PRACY_SEKUNDY))"
+	@echo "Examples:"
+	@echo "  make CLIENTS_TO_CREATE=500"
+	@echo "  make LOG_LEVEL=2"

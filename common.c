@@ -284,7 +284,16 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
         LOGE("Nie udało się zainicjalizować mutexa stolików\n");
         exit(1);
     }
+    /* Zainicjalizuj cond dla stolików (współdzielony między procesami) */
+    if (pthread_condattr_init(&cattr) != 0 ||
+        pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED) != 0 ||
+        pthread_cond_init(&stoliki_sync->cond, &cattr) != 0)
+    {
+        LOGE("Nie udało się zainicjalizować cond stolików\n");
+        exit(1);
+    }
     (void)pthread_mutexattr_destroy(&mattr);
+    (void)pthread_condattr_destroy(&cattr);
 
     /* Zainicjalizuj synchronizację kolejki (współdzielona między procesami) */
     queue_sync->count = 0;
@@ -406,7 +415,8 @@ void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
         if (msgsnd(msgq_id, &msg, sizeof(msg.grupa), IPC_NOWAIT) == 0)
         {
             queue_sync->count++;
-            (*klienci_w_kolejce)++;
+            /* Zliczamy rzeczywistą liczbę klientów (osób), nie tylko grup. */
+            (*klienci_w_kolejce) += msg.grupa.osoby;
             LOGD("kolejka_dodaj: pid=%d sent message pid=%d\n", (int)getpid(), msg.grupa.proces_id);
             pthread_cond_signal(&queue_sync->not_empty);
             pthread_mutex_unlock(&queue_sync->mutex);
@@ -492,6 +502,15 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
         if (r >= 0)
         {
             LOGD("kolejka_pobierz: pid=%d received message pid=%d\n", (int)getpid(), msg.grupa.proces_id);
+            /* Zmniejsz liczbę klientów w kolejce o liczbę osób w tej grupie. */
+            if (pthread_mutex_lock(&queue_sync->mutex) == 0)
+            {
+                if (*klienci_w_kolejce >= msg.grupa.osoby)
+                    *klienci_w_kolejce -= msg.grupa.osoby;
+                else
+                    *klienci_w_kolejce = 0;
+                pthread_mutex_unlock(&queue_sync->mutex);
+            }
             return msg.grupa;
         }
 
@@ -594,6 +613,14 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         {
             if (queue_sync->count > 0)
                 queue_sync->count--; /* defensywnie: upewnij się, że nie ujemne */
+            /* Zmniejsz liczbę klientów w kolejce o rozmiar tej grupy. */
+            if (klienci_w_kolejce && msg.grupa.osoby > 0)
+            {
+                if (*klienci_w_kolejce >= msg.grupa.osoby)
+                    *klienci_w_kolejce -= msg.grupa.osoby;
+                else
+                    *klienci_w_kolejce = 0;
+            }
             pthread_cond_signal(&queue_sync->not_full);
             pthread_mutex_unlock(&queue_sync->mutex);
         }

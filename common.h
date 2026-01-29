@@ -23,6 +23,38 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 }
 
 // ====== STAŁE ======
+#define NSEC_PER_MSEC 1000000L
+#define NSEC_PER_SEC 1000000000L
+
+/* Centralne ustawienia czasowe używane w symulacji. Można je zmieniać globalnie tutaj. */
+#ifndef SIMULATION_SECONDS_DEFAULT
+#define SIMULATION_SECONDS_DEFAULT 50 /* domyślny czas symulacji (sekundy) */
+#endif
+
+#ifndef SUMMARY_WAIT_SECONDS
+#define SUMMARY_WAIT_SECONDS 3 /* ile sekund czekamy na podsumowania na koniec */
+#endif
+
+#ifndef SHUTDOWN_TERM_TIMEOUT
+#define SHUTDOWN_TERM_TIMEOUT 4 /* seconds to wait after SIGTERM */
+#endif
+
+#ifndef SHUTDOWN_KILL_TIMEOUT
+#define SHUTDOWN_KILL_TIMEOUT 2 /* seconds to wait after SIGKILL */
+#endif
+
+#ifndef POLL_MS_SHORT
+#define POLL_MS_SHORT 50 /* short polling interval in ms */
+#endif
+
+#ifndef POLL_MS_MED
+#define POLL_MS_MED 100 /* medium polling interval in ms */
+#endif
+
+#ifndef POLL_MS_LONG
+#define POLL_MS_LONG 200 /* long polling interval in ms */
+#endif
+
 #define X1 10                                         // liczba stolików o pojemności 1
 #define X2 10                                         // liczba stolików o pojemności 2
 #define X3 10                                         // liczba stolików o pojemności 3
@@ -40,7 +72,7 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 #define TP 10                                         // godzina otwarcia restauracji
 #define TK 22                                         // godzina zamknięcia restauracji
 #ifndef CZAS_PRACY
-#define CZAS_PRACY (TK - TP) * 5 // czas otwarcia restauracji w sekundach
+#define CZAS_PRACY (TK - TP) // czas otwarcia restauracji w sekundach
 #endif
 
 extern int czas_pracy_domyslny;
@@ -133,6 +165,7 @@ struct TasmaSync
 struct StolikiSync
 {
     pthread_mutex_t mutex; // chroni dostęp do tablicy `stoliki`
+    pthread_cond_t cond;   // sygnalizuje zmiany w stanie stolików (np. danie_specjalne)
 };
 
 struct QueueSync

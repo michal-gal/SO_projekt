@@ -102,7 +102,6 @@ void kierownik(void)
     LOGS("Kierownik kończy pracę.\n");
 
     fsync(STDOUT_FILENO); // Ensure logs are flushed
-    sleep(2);             // Give time for logs to be printed
     exit(0);
 }
 

@@ -53,7 +53,8 @@ static void *watek_kolejki(void *arg)
             {
                 LOGP("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
                      group_num, numer_stolika, zajete, pojemnosc);
-                (*klienci_przyjeci)++;
+                /* Zliczamy osoby (klientów), a nie grupy. */
+                (*klienci_przyjeci) += g.osoby;
                 if (g.proces_id > 0)
                     (void)kill(g.proces_id, SIGUSR1);
             }
@@ -109,7 +110,11 @@ static void *watek_specjalne(void *arg)
         int spec_grupa_idx[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
         int spec_cnt = 0;
 
-        pthread_mutex_lock(&stoliki_sync->mutex);
+        /* Wait for a change in stoliki (special order placed) or shutdown. */
+        if (pthread_mutex_lock(&stoliki_sync->mutex) != 0)
+            continue;
+
+        /* Scan once: reserve any newly requested special dishes. */
         for (int stolik = 0; stolik < MAX_STOLIKI; stolik++)
         {
             for (int grupa = 0; grupa < stoliki[stolik].liczba_grup; grupa++)
@@ -126,6 +131,15 @@ static void *watek_specjalne(void *arg)
                 }
             }
         }
+
+        if (spec_cnt == 0 && *restauracja_otwarta && !shutdown_requested)
+        {
+            /* No specials now – wait until someone signals a change. */
+            (void)pthread_cond_wait(&stoliki_sync->cond, &stoliki_sync->mutex);
+            pthread_mutex_unlock(&stoliki_sync->mutex);
+            continue;
+        }
+
         pthread_mutex_unlock(&stoliki_sync->mutex);
 
         for (int i = 0; i < spec_cnt; i++)
@@ -153,9 +167,6 @@ static void *watek_specjalne(void *arg)
             }
             pthread_mutex_unlock(&stoliki_sync->mutex);
         }
-
-        struct timespec req = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000}; // 50ms
-        (void)rest_nanosleep(&req, NULL);
     }
 
     return NULL;
@@ -170,10 +181,12 @@ static void *watek_podsumowanie(void *arg)
 
     czekaj_na_ture(1, &ignore_shutdown);
 
-    while (*restauracja_otwarta)
+    /* Wait for restaurant to close; use stoliki_sync cond to avoid polling. */
+    if (pthread_mutex_lock(&stoliki_sync->mutex) == 0)
     {
-        struct timespec req = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000}; // 50ms
-        (void)rest_nanosleep(&req, NULL);
+        while (*restauracja_otwarta)
+            (void)pthread_cond_wait(&stoliki_sync->cond, &stoliki_sync->mutex);
+        pthread_mutex_unlock(&stoliki_sync->mutex);
     }
 
     if (already_printed)
@@ -263,8 +276,8 @@ static void wypisz_podsumowanie(void)
         tasma_suma += tasma_dania_niesprzedane[i] * CENY_DAN[i];
     }
     LOGS("===Suma: %d zł===\n", tasma_suma);
-
     LOGS("\n\nObsługa kończy pracę.\n");
+    LOGS("Klienci w kolejce: %d\n", *klienci_w_kolejce);
     LOGS("======================\n");
 
     fsync(STDOUT_FILENO); // Ensure all summary logs are flushed
@@ -298,11 +311,12 @@ void obsluga(void)
     if (pthread_create(&t_podsumowanie, NULL, watek_podsumowanie, NULL) != 0)
         LOGE_ERRNO("pthread_create(podsumowanie)");
 
-    // Wait while restaurant is open
-    while (*restauracja_otwarta && !shutdown_requested)
+    // Wait while restaurant is open; use stoliki_sync cond to avoid polling
+    if (pthread_mutex_lock(&stoliki_sync->mutex) == 0)
     {
-        struct timespec req = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000}; // 50ms
-        (void)rest_nanosleep(&req, NULL);
+        while (*restauracja_otwarta && !shutdown_requested)
+            (void)pthread_cond_wait(&stoliki_sync->cond, &stoliki_sync->mutex);
+        pthread_mutex_unlock(&stoliki_sync->mutex);
     }
 
     // Shutdown threads
@@ -316,7 +330,6 @@ void obsluga(void)
 
     // Wait for summary thread to finish
     (void)pthread_join(t_podsumowanie, NULL);
-    sleep(2); // Give time for logs to be printed
     exit(0);
 }
 
