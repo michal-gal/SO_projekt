@@ -12,23 +12,27 @@
 #include <unistd.h>    // sleep
 
 // ====== INLINE FUNKCJE ======
-static inline unsigned rest_sleep(unsigned seconds) // wrapper dla sleep()
-{
-    return sleep(seconds);
-}
-
-static inline int rest_nanosleep(const struct timespec *req, struct timespec *rem) // wrapper dla nanosleep()
-{
-    return nanosleep(req, rem);
-}
+/* removed unused wrappers rest_sleep/rest_nanosleep; use `sleep_ms()` or
+   direct `nanosleep()` when needed */
 
 // ====== STAŁE ======
 #define NSEC_PER_MSEC 1000000L
 #define NSEC_PER_SEC 1000000000L
 
+/**
+ * Sleep for given milliseconds. Returns 0 on success, -1 on error.
+ */
+static inline int sleep_ms(unsigned ms)
+{
+    struct timespec req;
+    req.tv_sec = ms / 1000;
+    req.tv_nsec = (long)(ms % 1000) * NSEC_PER_MSEC;
+    return nanosleep(&req, NULL);
+}
+
 /* Centralne ustawienia czasowe używane w symulacji. Można je zmieniać globalnie tutaj. */
 #ifndef SIMULATION_SECONDS_DEFAULT
-#define SIMULATION_SECONDS_DEFAULT 1 /* domyślny czas symulacji (sekundy) */
+#define SIMULATION_SECONDS_DEFAULT 20 /* domyślny czas symulacji (sekundy) */
 #endif
 
 #ifndef SUMMARY_WAIT_SECONDS
@@ -41,6 +45,15 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 
 #ifndef SHUTDOWN_KILL_TIMEOUT
 #define SHUTDOWN_KILL_TIMEOUT 2 /* seconds to wait after SIGKILL */
+#endif
+
+/* Central defaults for various timeouts (seconds). Adjust here to affect whole program. */
+#ifndef KIEROWNIK_INTERVAL_DEFAULT
+#define KIEROWNIK_INTERVAL_DEFAULT 30 /* seconds between manager wakes */
+#endif
+
+#ifndef MAX_AKTYWNYCH_KLIENTOW_DEFAULT
+#define MAX_AKTYWNYCH_KLIENTOW_DEFAULT 5000 /* default cap of active clients */
 #endif
 
 #ifndef POLL_MS_SHORT
@@ -70,7 +83,7 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 #define MAX_TASMA 150                                 // maksymalna długość taśmy
 #define MAX_GRUP_NA_STOLIKU 4                         // maksymalna liczba grup na jednym stoliku
 #define TP 10                                         // godzina otwarcia restauracji
-#define TK 15                                         // godzina zamknięcia restauracji
+#define TK 20                                         // godzina zamknięcia restauracji
 #ifndef CZAS_PRACY
 #define CZAS_PRACY (TK - TP) // czas otwarcia restauracji w sekundach
 #endif

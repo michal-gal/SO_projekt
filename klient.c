@@ -309,6 +309,8 @@ static WynikPobraniaDania sprobuj_pobrac_danie(struct Grupa *g, int *dania_pobra
         if (tasma_sync->count > 0)
             tasma_sync->count--;
         pthread_cond_signal(&tasma_sync->not_full);
+        LOGD("sprobuj_pobrac_danie: grupa %d pobrała danie za %d zł z pozycji %d (count=%d)\n",
+             log_pid, log_cena, idx_tasma, tasma_sync->count);
         clock_gettime(CLOCK_MONOTONIC, czas_start_dania);
         pthread_mutex_unlock(&tasma_sync->mutex);
 

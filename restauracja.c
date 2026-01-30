@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "restauracja.h"
 
 #ifndef CLIENTS_TO_CREATE
@@ -19,6 +21,15 @@
 #include <pthread.h>
 
 extern int current_log_level;
+
+/* Pomocnik: zwraca upływ sekund od czasu `start` według CLOCK_MONOTONIC. */
+static inline long elapsed_seconds_since(const struct timespec *start)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0;
+    return now.tv_sec - start->tv_sec;
+}
 
 // ====== ZMIENNE GLOBALNE ======
 
@@ -96,7 +107,7 @@ static void zbierz_zombie_nieblokujaco(int *status) // zbiera zakończone proces
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        //  LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n", (int)getpid(), (int)p, (status ? *status : -1));
+        LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n", (int)getpid(), (int)p, (status ? *status : -1));
     }
 }
 
@@ -108,7 +119,7 @@ static int zbierz_zombie_nieblokujaco_licznik(int *status) // zbiera zakończone
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        // LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n", (int)getpid(), (int)p);
+        LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n", (int)getpid(), (int)p);
         if (p != pid_obsluga && p != pid_kucharz && p != pid_kierownik)
             reaped++;
     }
@@ -157,17 +168,18 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
     const int timeout_term = SHUTDOWN_TERM_TIMEOUT;
     const int timeout_kill = SHUTDOWN_KILL_TIMEOUT;
 
-    // LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
+    LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
     if (children_pgid > 0)
     {
-        //     LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n", (int)getpid(), (int)children_pgid);
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n", (int)getpid(), (int)children_pgid);
         kill(-children_pgid, SIGTERM);
     }
 
-    time_t start = time(NULL);
-    while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_term)
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    while (!czy_grupa_procesow_pusta(children_pgid) && elapsed_seconds_since(&start) < timeout_term)
     {
-        //   LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n", (int)getpid(), (long)elapsed_seconds_since(&start));
         zbierz_zombie_nieblokujaco(status);
         sched_yield();
     }
@@ -176,14 +188,14 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
     {
         if (children_pgid > 0)
         {
-            //    LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n", (int)getpid(), (int)children_pgid);
+            LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n", (int)getpid(), (int)children_pgid);
             kill(-children_pgid, SIGKILL);
         }
 
-        start = time(NULL);
-        while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_kill)
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        while (!czy_grupa_procesow_pusta(children_pgid) && elapsed_seconds_since(&start) < timeout_kill)
         {
-            //  LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
+            LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, elapsed=%ld\n", (int)getpid(), (long)elapsed_seconds_since(&start));
             zbierz_zombie_nieblokujaco(status);
             sched_yield();
         }
@@ -191,9 +203,9 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
 
     while (waitpid(-1, NULL, WNOHANG) > 0)
     {
-        // LOGD("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n", (int)getpid());
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n", (int)getpid());
     }
-    // LOGD("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
+    LOGD("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
 }
 
 // ====== GENERATOR KLIENTÓW ======
@@ -382,10 +394,11 @@ int main(int argc, char **argv)
     if (children_pgid > 0)
         (void)setpgid(pid_kierownik, children_pgid);
 
-    time_t start_czekania = time(NULL);
+    struct timespec start_czekania;
+    clock_gettime(CLOCK_MONOTONIC, &start_czekania);
     int status;
 
-    int max_aktywnych_klientow = 256; // limit aktywnych klientów naraz (można nadpisać env)
+    int max_aktywnych_klientow = MAX_AKTYWNYCH_KLIENTOW_DEFAULT; // limit aktywnych klientów naraz (można nadpisać env)
     const char *max_env = getenv("RESTAURACJA_MAX_AKTYWNYCH_KLIENTOW");
     if (max_env && *max_env)
     {
@@ -403,7 +416,7 @@ int main(int argc, char **argv)
     int aktywni_klienci = 0;
     int liczba_utworzonych_grup = max_losowych_grup; // liczba grup do utworzenia
     /* Interwał (sekundy) między budzeniem kierownika poprzez SEM_KIEROWNIK. */
-    int kierownik_interval = 30;
+    int kierownik_interval = KIEROWNIK_INTERVAL_DEFAULT;
     const char *kier_env = getenv("RESTAURACJA_KIEROWNIK_INTERVAL");
     if (kier_env && *kier_env)
     {
@@ -413,15 +426,16 @@ int main(int argc, char **argv)
         if (errno == 0 && end && *end == '\0' && v > 0)
             kierownik_interval = (int)v;
     }
-    time_t last_kierownik_post = time(NULL);
+    struct timespec last_kierownik_post;
+    clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
     int numer_grupy = 1; // licznik grup klientów
     while (liczba_utworzonych_grup-- && !sigint_requested)
     {
         /* Okresowo budź kierownika, aby wykonywał swoje działania. */
-        if (kierownik_interval > 0 && time(NULL) - last_kierownik_post >= kierownik_interval)
+        if (kierownik_interval > 0 && elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
         {
             sem_operacja(SEM_KIEROWNIK, 1);
-            last_kierownik_post = time(NULL);
+            clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
         }
         aktywni_klienci -= zbierz_zombie_nieblokujaco_licznik(&status);
 
@@ -456,21 +470,22 @@ int main(int argc, char **argv)
     };
     // symulacja pracy restauracji przez SIMULATION_SECONDS_DEFAULT sekund (bez sleep)
     {
-        time_t sim_start = time(NULL);
-        while (time(NULL) - sim_start < SIMULATION_SECONDS_DEFAULT && !sigint_requested)
+        struct timespec sim_start;
+        clock_gettime(CLOCK_MONOTONIC, &sim_start);
+        while (elapsed_seconds_since(&sim_start) < SIMULATION_SECONDS_DEFAULT && !sigint_requested)
         {
             /* Okresowo budź kierownika podczas symulacji również. */
-            if (kierownik_interval > 0 && time(NULL) - last_kierownik_post >= kierownik_interval)
+            if (kierownik_interval > 0 && elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
             {
                 sem_operacja(SEM_KIEROWNIK, 1);
-                last_kierownik_post = time(NULL);
+                clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
             }
             zbierz_zombie_nieblokujaco(&status);
             sched_yield();
         }
     }
 
-    int koniec_czasu = (time(NULL) - start_czekania >= czas_pracy);                        // czy zakończenie z powodu upływu czasu
+    int koniec_czasu = (elapsed_seconds_since(&start_czekania) >= czas_pracy);             // czy zakończenie z powodu upływu czasu
     int przerwano_sygnalem = sigint_requested;                                             // czy zakończenie z powodu sygnału przerwania
     int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem && !*restauracja_otwarta); // czy zakończenie z powodu zamknięcia restauracji flagą
 
@@ -492,14 +507,13 @@ int main(int argc, char **argv)
     sygnalizuj_ture();
 
     // Daj czas na wydrukowanie podsumowań (obsługa -> kucharz -> kierownik).
-    time_t podsumowanie_start = time(NULL);
-    while (*kolej_podsumowania != 3 && time(NULL) - podsumowanie_start < SUMMARY_WAIT_SECONDS)
+    struct timespec podsumowanie_start;
+    clock_gettime(CLOCK_MONOTONIC, &podsumowanie_start);
+    while (*kolej_podsumowania != 3 && elapsed_seconds_since(&podsumowanie_start) < SUMMARY_WAIT_SECONDS)
     {
-        struct timespec req = {.tv_sec = 0, .tv_nsec = POLL_MS_MED * NSEC_PER_MSEC};
-        (void)rest_nanosleep(&req, NULL);
+        (void)sleep_ms(POLL_MS_MED);
     }
-    struct timespec req = {.tv_sec = 0, .tv_nsec = POLL_MS_LONG * NSEC_PER_MSEC};
-    (void)rest_nanosleep(&req, NULL);
+    (void)sleep_ms(POLL_MS_LONG);
 
     LOGD("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
 

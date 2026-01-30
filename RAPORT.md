@@ -30,6 +30,8 @@ Uruchamianie programu:
 - `common.c`: wspólne API dla IPC (shm/semafory/msgq), generator stolików, funkcje pomocnicze synchronizacji i sprzątania.
 - `klient.c` / `obsluga.c` / `kucharz.c` / `kierownik.c`: logika ról + łagodna obsługa SIGTERM.
 - `log.c` + `log.h`: wspólny logger (`LOGI/LOGD/LOGE`), poziomy logowania, zapis do pliku, prefiks czasu/PID/poziomu.
+- `log.c` + `log.h`: wspólny logger (`LOGI/LOGD/LOGE`), poziomy logowania, zapis do pliku, prefiks czasu/PID/poziomu.
+  - Uwaga: `LOGD` (debug) zostało zmienione tak, aby zapisywać komunikaty do pliku logów niezależnie od ustawienia konsolowego. W repozytorium dodano `LOGD`-owe komunikaty opisujące operacje na taśmie (np. "wydano danie na taśmę" i "pobrano danie z taśmy").
 
 ## Dodane elementy specjalne
 

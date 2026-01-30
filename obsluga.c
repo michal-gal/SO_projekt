@@ -25,7 +25,7 @@ static void *watek_kolejki(void *arg)
     while (*restauracja_otwarta && !shutdown_requested)
     {
         struct Grupa g = kolejka_pobierz();
-        // LOGD("obsluga: pid=%d kolejka_pobierz returned group=%d\n", (int)getpid(), g.numer_grupy);
+        LOGD("obsluga: pid=%d kolejka_pobierz returned group=%d\n", (int)getpid(), g.numer_grupy);
         if (g.numer_grupy != 0)
         {
             int stolik_idx = -1;

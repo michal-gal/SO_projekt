@@ -45,11 +45,10 @@ void log_printf_force_stdio(char level, const char *fmt, ...);
             log_printf('I', __VA_ARGS__); \
     } while (0)
 
-#define LOGD(...)                         \
-    do                                    \
-    {                                     \
-        if (current_log_level >= 3)       \
-            log_printf('D', __VA_ARGS__); \
+#define LOGD(...)                     \
+    do                                \
+    {                                 \
+        log_printf('D', __VA_ARGS__); \
     } while (0)
 
 #define LOGE(...)                         \

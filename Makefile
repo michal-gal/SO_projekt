@@ -4,14 +4,16 @@ CC = gcc
 #   make CLIENTS_TO_CREATE=500 ...
 # Backwards-compatible: `LICZBA_GRUP` mirrors `CLIENTS_TO_CREATE` unless set explicitly.
 LOG_LEVEL ?= 1
-CLIENTS_TO_CREATE ?= 1000
+CLIENTS_TO_CREATE ?= 5000
 LICZBA_GRUP ?= $(CLIENTS_TO_CREATE)
-CZAS_PRACY_SEKUNDY ?= 10
+CZAS_PRACY_SEKUNDY ?= 60
 
 # Compiler/linker flags
 CFLAGS = -Wall -g
 CFLAGS += -DLOG_LEVEL=$(LOG_LEVEL)
 CFLAGS += # MAX_LOSOWYCH_GRUP and CLIENTS_TO_CREATE are controlled at runtime via program arguments
+# Pass CLIENTS_TO_CREATE from Makefile into compile-time macro so default can be adjusted via make
+CFLAGS += -DCLIENTS_TO_CREATE=$(CLIENTS_TO_CREATE)
 CFLAGS += -DCZAS_PRACY=$(CZAS_PRACY_SEKUNDY)
 CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread

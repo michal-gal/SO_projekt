@@ -168,11 +168,24 @@ static void log_vprintf(char level, const char *fmt, va_list ap, int force_stdio
         out_len += want;
     }
 
+    /* Always write to log file when available. */
     if (log_fd >= 0)
         (void)write(log_fd, out, out_len);
 
-    if (force_stdio || log_stdio_enabled)
+    /*
+     * Console policy:
+     * - If `force_stdio` is set (used by LOGS), always print to console
+     *   (stderr for 'E', stdout otherwise).
+     * - Otherwise, print to console only for LOGP ('P') when enabled by env.
+     */
+    if (force_stdio)
+    {
         (void)write((level == 'E') ? STDERR_FILENO : STDOUT_FILENO, out, out_len);
+    }
+    else if (level == 'P' && log_stdio_enabled)
+    {
+        (void)write(STDOUT_FILENO, out, out_len);
+    }
 }
 
 void log_printf(char level, const char *fmt, ...) // loguje komunikat z danym poziomem

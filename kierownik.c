@@ -89,9 +89,9 @@ void kierownik(void)
     // wywołać `kierownik_wyslij_sygnal()`, które wysyła okazjonalne sygnały do `obsluga`.
     while (*restauracja_otwarta && !shutdown_requested)
     {
-        // LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
+        LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
         sem_operacja(SEM_KIEROWNIK, -1);
-        // LOGD("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
+        LOGD("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
         kierownik_wyslij_sygnal();
         if (shutdown_requested)
             break;

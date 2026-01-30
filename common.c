@@ -180,6 +180,7 @@ void dodaj_danie(struct Talerzyk *tasma_local, int cena) // dodaje danie na taś
     tasma_local[0].stolik_specjalny = 0;
     tasma_sync->count++;
     pthread_cond_signal(&tasma_sync->not_empty);
+    LOGD("dodaj_danie: wydano danie za %d zł na taśmę (count=%d)\n", cena, tasma_sync->count);
 }
 
 // ====== OPERACJE IPC ======
@@ -536,7 +537,7 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
 // ====== CZYSZCZENIE ======
 void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich klientów i czyści stan stolików i kolejki
 {
-    // LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n", (int)getpid());
+    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n", (int)getpid());
 
     // Klienci usadzeni przy stolikach.
     int stoliki_locked = 0;
@@ -568,7 +569,7 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         pthread_mutex_unlock(&stoliki_sync->mutex);
 
     // Klienci w kolejce wejściowej.
-    // LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n", (int)getpid());
+    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n", (int)getpid());
     QueueMsg msg;
     for (;;)
     {
@@ -585,10 +586,10 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         }
 
         pid_t pid = msg.grupa.proces_id;
-        // LOGD("zakoncz_klientow: pid=%d popped queued client pid=%d\n", (int)getpid(), (int)pid);
+        LOGD("zakoncz_klientow: pid=%d popped queued client pid=%d\n", (int)getpid(), (int)pid);
         if (pid > 0)
         {
-            //  LOGD("zakoncz_klientow: pid=%d killing queued client pid=%d\n", (int)getpid(), (int)pid);
+            LOGD("zakoncz_klientow: pid=%d killing queued client pid=%d\n", (int)getpid(), (int)pid);
             (void)kill(pid, SIGTERM);
         }
 
@@ -613,7 +614,7 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         {
         }
     }
-    // LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n", (int)getpid());
+    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n", (int)getpid());
 }
 
 // Funkcja dla kierownika do zamknięcia restauracji
