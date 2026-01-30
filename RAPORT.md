@@ -14,8 +14,8 @@ Projekt był kompilowany i uruchamiany na następującej konfiguracji:
 
 Uruchamianie programu:
 
-- `./restauracja [<liczba_klientow>] [<czas_sekund>] [<log_level>]`
-- Domyślne wartości (gdy nie podano argumentów): 5000 klientów, 30 sekund, log level 1.
++- `./restauracja [<liczba_klientow>] [<czas_sekund>] [<log_level>]`
++- Domyślne wartości (gdy nie podano argumentów): 5000 klientów, 60 sekund, log level 1.
 
 ## Założenia projektowe
 
@@ -29,7 +29,6 @@ Uruchamianie programu:
 - `restauracja.c`: główny proces – tworzy IPC, uruchamia dzieci przez fork/exec, zarządza grupą procesów, forwarduje sygnały job-control, na końcu sprząta IPC.
 - `common.c`: wspólne API dla IPC (shm/semafory/msgq), generator stolików, funkcje pomocnicze synchronizacji i sprzątania.
 - `klient.c` / `obsluga.c` / `kucharz.c` / `kierownik.c`: logika ról + łagodna obsługa SIGTERM.
-- `log.c` + `log.h`: wspólny logger (`LOGI/LOGD/LOGE`), poziomy logowania, zapis do pliku, prefiks czasu/PID/poziomu.
 - `log.c` + `log.h`: wspólny logger (`LOGI/LOGD/LOGE`), poziomy logowania, zapis do pliku, prefiks czasu/PID/poziomu.
   - Uwaga: `LOGD` (debug) zostało zmienione tak, aby zapisywać komunikaty do pliku logów niezależnie od ustawienia konsolowego. W repozytorium dodano `LOGD`-owe komunikaty opisujące operacje na taśmie (np. "wydano danie na taśmę" i "pobrano danie z taśmy").
 
