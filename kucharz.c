@@ -32,7 +32,7 @@ static void drukuj_podsumowanie_kuchni(void)
     }
     LOGS("\nSuma: %d zł\n", kuchnia_suma);
 
-        fsync(STDOUT_FILENO); // Wymuś zapis wszystkich logów podsumowania
+    fsync(STDOUT_FILENO); // Wymuś zapis wszystkich logów podsumowania
 }
 
 // Główna funkcja kucharza
@@ -47,9 +47,9 @@ void kucharz(void)
     // Czekaj na otwarcie restauracji sygnalizowane przez SEM_TURA zamiast aktywnego czekania.
     // Rodzic ustawia *kolej_podsumowania i wywołuje sygnalizuj_ture()
     // gdy restauracja się otwiera, więc zużyj ten token semafora tutaj.
-    LOGD("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
+    // LOGD("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
     sem_operacja(SEM_TURA, -1);
-    LOGD("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
+    // LOGD("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
 
     // Po uruchomieniu, czekaj na turę podsumowania (2) lub zamknięcie.
     czekaj_na_ture(2, &shutdown_requested);

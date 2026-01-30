@@ -106,18 +106,10 @@ void ustaw_shutdown_flag(volatile sig_atomic_t *flag)
 
 void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown) // czeka na turę wskazaną przez wartość 'turn'
 {
-    LOGD("czekaj_na_ture: pid=%d waiting for turn=%d\n", (int)getpid(), turn);
-    int spin = 0;
     while (*kolej_podsumowania != turn && !*shutdown)
     {
-        if ((++spin % 50) == 0)
-        {
-            LOGD("czekaj_na_ture: pid=%d still waiting turn=%d current=%d shutdown=%d\n",
-                 (int)getpid(), turn, *kolej_podsumowania, (int)(shutdown ? *shutdown : 0));
-        }
         sem_operacja(SEM_TURA, -1);
     }
-    LOGD("czekaj_na_ture: pid=%d done waiting for turn=%d current=%d\n", (int)getpid(), turn, *kolej_podsumowania);
 }
 
 void sygnalizuj_ture(void) // sygnalizuje zmianę tury podsumowania
@@ -157,7 +149,7 @@ void generator_stolikow(struct Stolik *stoliki_local) // generuje stoliki w rest
             stoliki_local[idx].zajete_miejsca = 0;
             memset(stoliki_local[idx].grupy, 0, sizeof(stoliki_local[idx].grupy));
 
-            LOGD("Stolik %d o pojemności %d utworzony.\n",
+            LOGP("Stolik %d o pojemności %d utworzony.\n",
                  stoliki_local[idx].numer_stolika,
                  stoliki_local[idx].pojemnosc);
         }
@@ -196,10 +188,8 @@ void sem_operacja(int sem, int val) // wykonuje operację na semaforze
     struct sembuf sb = {sem, val, SEM_UNDO}; // SEM_UNDO aby uniknąć deadlocka przy nagłym zakończeniu procesu
     for (;;)
     {
-        LOGD("sem_operacja: pid=%d sem=%d val=%d\n", (int)getpid(), sem, val);
         if (semop(sem_id, &sb, 1) == 0) // operacja zakończona sukcesem
         {
-            LOGD("sem_operacja: pid=%d sem=%d val=%d done\n", (int)getpid(), sem, val);
             return;
         }
 
@@ -207,7 +197,6 @@ void sem_operacja(int sem, int val) // wykonuje operację na semaforze
         {
             if (shutdown_flag_ptr && *shutdown_flag_ptr)
             {
-                LOGD("sem_operacja: pid=%d interrupted by signal during shutdown, exiting\n", (int)getpid());
                 exit(0);
             }
             continue;
@@ -500,7 +489,6 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
         ssize_t r = msgrcv(msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
         if (r >= 0)
         {
-            LOGD("kolejka_pobierz: pid=%d received message pid=%d\n", (int)getpid(), msg.grupa.proces_id);
             /* Zmniejsz liczbę klientów w kolejce o liczbę osób w tej grupie. */
             if (pthread_mutex_lock(&queue_sync->mutex) == 0)
             {
@@ -548,7 +536,7 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
 // ====== CZYSZCZENIE ======
 void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich klientów i czyści stan stolików i kolejki
 {
-    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n", (int)getpid());
+    // LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n", (int)getpid());
 
     // Klienci usadzeni przy stolikach.
     int stoliki_locked = 0;
@@ -560,29 +548,27 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
             stoliki_locked = 1;
     }
     if (!stoliki_locked)
-        LOGD("zakoncz_klientow: pid=%d failed to lock stoliki mutex, continuing without lock\n", (int)getpid());
 
-    for (int i = 0; i < MAX_STOLIKI; i++)
-    {
-        for (int j = 0; j < stoliki[i].liczba_grup; j++)
+        for (int i = 0; i < MAX_STOLIKI; i++)
         {
-            pid_t pid = stoliki[i].grupy[j].proces_id;
-            if (pid > 0)
+            for (int j = 0; j < stoliki[i].liczba_grup; j++)
             {
-                LOGD("zakoncz_klientow: pid=%d killing seated client pid=%d at stolik=%d\n", (int)getpid(), (int)pid, i + 1);
-                (void)kill(pid, SIGTERM);
+                pid_t pid = stoliki[i].grupy[j].proces_id;
+                if (pid > 0)
+                {
+                    (void)kill(pid, SIGTERM);
+                }
             }
-        }
 
-        memset(stoliki[i].grupy, 0, sizeof(stoliki[i].grupy));
-        stoliki[i].liczba_grup = 0;
-        stoliki[i].zajete_miejsca = 0;
-    }
+            memset(stoliki[i].grupy, 0, sizeof(stoliki[i].grupy));
+            stoliki[i].liczba_grup = 0;
+            stoliki[i].zajete_miejsca = 0;
+        }
     if (stoliki_locked)
         pthread_mutex_unlock(&stoliki_sync->mutex);
 
     // Klienci w kolejce wejściowej.
-    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n", (int)getpid());
+    // LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n", (int)getpid());
     QueueMsg msg;
     for (;;)
     {
@@ -599,10 +585,10 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         }
 
         pid_t pid = msg.grupa.proces_id;
-        LOGD("zakoncz_klientow: pid=%d popped queued client pid=%d\n", (int)getpid(), (int)pid);
+        // LOGD("zakoncz_klientow: pid=%d popped queued client pid=%d\n", (int)getpid(), (int)pid);
         if (pid > 0)
         {
-            LOGD("zakoncz_klientow: pid=%d killing queued client pid=%d\n", (int)getpid(), (int)pid);
+            //  LOGD("zakoncz_klientow: pid=%d killing queued client pid=%d\n", (int)getpid(), (int)pid);
             (void)kill(pid, SIGTERM);
         }
 
@@ -625,10 +611,9 @@ void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void) // kończy wszystkich kl
         }
         else
         {
-            LOGD("zakoncz_klientow: pid=%d could not lock queue_sync mutex, skipping count update\n", (int)getpid());
         }
     }
-    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n", (int)getpid());
+    // LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n", (int)getpid());
 }
 
 // Funkcja dla kierownika do zamknięcia restauracji

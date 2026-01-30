@@ -25,7 +25,7 @@ static void *watek_kolejki(void *arg)
     while (*restauracja_otwarta && !shutdown_requested)
     {
         struct Grupa g = kolejka_pobierz();
-        LOGD("obsluga: pid=%d kolejka_pobierz returned group=%d\n", (int)getpid(), g.numer_grupy);
+        // LOGD("obsluga: pid=%d kolejka_pobierz returned group=%d\n", (int)getpid(), g.numer_grupy);
         if (g.numer_grupy != 0)
         {
             int stolik_idx = -1;
@@ -240,8 +240,6 @@ static void obsluga_podaj_dania_normalne(double wydajnosc)
         if (idx >= 0)
             kuchnia_dania_wydane[idx]++;
         pthread_mutex_unlock(&tasma_sync->mutex);
-
-        LOGD("Danie za %d zł dodane na taśmę.\n", c);
     }
 }
 

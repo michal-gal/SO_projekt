@@ -137,13 +137,13 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
     sigprocmask(SIG_BLOCK, &block_set, &old_set);
 
     kolejka_dodaj(*g);
-    LOGP("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
+    /* LOGD("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
          g->numer_grupy,
          g->osoby,
          g->dorosli,
          g->dzieci,
          g->vip ? " [VIP]" : "");
-
+ */
     while (g->stolik_przydzielony == -1 && *restauracja_otwarta && !prosba_zamkniecia)
     {
         int log_znaleziono = 0;

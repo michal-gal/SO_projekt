@@ -96,7 +96,7 @@ static void zbierz_zombie_nieblokujaco(int *status) // zbiera zakończone proces
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n", (int)getpid(), (int)p, (status ? *status : -1));
+        //  LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n", (int)getpid(), (int)p, (status ? *status : -1));
     }
 }
 
@@ -108,7 +108,7 @@ static int zbierz_zombie_nieblokujaco_licznik(int *status) // zbiera zakończone
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n", (int)getpid(), (int)p);
+        // LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n", (int)getpid(), (int)p);
         if (p != pid_obsluga && p != pid_kucharz && p != pid_kierownik)
             reaped++;
     }
@@ -157,17 +157,17 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
     const int timeout_term = SHUTDOWN_TERM_TIMEOUT;
     const int timeout_kill = SHUTDOWN_KILL_TIMEOUT;
 
-    LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
+    // LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n", (int)getpid(), (int)children_pgid);
     if (children_pgid > 0)
     {
-        LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n", (int)getpid(), (int)children_pgid);
+        //     LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n", (int)getpid(), (int)children_pgid);
         kill(-children_pgid, SIGTERM);
     }
 
     time_t start = time(NULL);
     while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_term)
     {
-        LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
+        //   LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
         zbierz_zombie_nieblokujaco(status);
         sched_yield();
     }
@@ -176,14 +176,14 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
     {
         if (children_pgid > 0)
         {
-            LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n", (int)getpid(), (int)children_pgid);
+            //    LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n", (int)getpid(), (int)children_pgid);
             kill(-children_pgid, SIGKILL);
         }
 
         start = time(NULL);
         while (!czy_grupa_procesow_pusta(children_pgid) && time(NULL) - start < timeout_kill)
         {
-            LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
+            //  LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, elapsed=%ld\n", (int)getpid(), (long)(time(NULL) - start));
             zbierz_zombie_nieblokujaco(status);
             sched_yield();
         }
@@ -191,9 +191,9 @@ static void zakoncz_wszystkie_dzieci(int *status) // kończy wszystkie procesy p
 
     while (waitpid(-1, NULL, WNOHANG) > 0)
     {
-        LOGD("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n", (int)getpid());
+        // LOGD("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n", (int)getpid());
     }
-    LOGD("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
+    // LOGD("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
 }
 
 // ====== GENERATOR KLIENTÓW ======
@@ -400,13 +400,6 @@ int main(int argc, char **argv)
     const char *disable_env = getenv("RESTAURACJA_DISABLE_MANAGER_CLOSE");
     if (disable_env && strcmp(disable_env, "1") == 0)
         disable_close = 1;
-
-    /* uruchom wątek zbierający zombie w tle */
-    /* USUNIĘTY: watek_zombie powoduje wyścig z waitpid w głównej pętli */
-    /*
-    if (pthread_create(&t_zombie, NULL, watek_zombie, NULL) != 0)
-        LOGE_ERRNO("pthread_create(zombie)");
-    */
     int aktywni_klienci = 0;
     int liczba_utworzonych_grup = max_losowych_grup; // liczba grup do utworzenia
     /* Interwał (sekundy) między budzeniem kierownika poprzez SEM_KIEROWNIK. */

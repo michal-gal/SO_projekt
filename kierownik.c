@@ -56,11 +56,11 @@ static void kierownik_wyslij_sygnal(void)
         if (!disable_close)
         {
             kierownik_zamknij_restauracje_i_zakoncz_klientow();
-            LOGI("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
+            LOGP("Kierownik zamyka restaurację (bez sygnału do obsługi).\n");
         }
         else
         {
-            LOGI("Kierownik: zamykanie wyłączone (RESTAURACJA_DISABLE_MANAGER_CLOSE=1)\n");
+            LOGP("Kierownik: zamykanie wyłączone (RESTAURACJA_DISABLE_MANAGER_CLOSE=1)\n");
         }
     }
     // // }
@@ -89,9 +89,9 @@ void kierownik(void)
     // wywołać `kierownik_wyslij_sygnal()`, które wysyła okazjonalne sygnały do `obsluga`.
     while (*restauracja_otwarta && !shutdown_requested)
     {
-        LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
+        // LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
         sem_operacja(SEM_KIEROWNIK, -1);
-        LOGD("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
+        // LOGD("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
         kierownik_wyslij_sygnal();
         if (shutdown_requested)
             break;

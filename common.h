@@ -28,11 +28,11 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 
 /* Centralne ustawienia czasowe używane w symulacji. Można je zmieniać globalnie tutaj. */
 #ifndef SIMULATION_SECONDS_DEFAULT
-#define SIMULATION_SECONDS_DEFAULT 50 /* domyślny czas symulacji (sekundy) */
+#define SIMULATION_SECONDS_DEFAULT 1 /* domyślny czas symulacji (sekundy) */
 #endif
 
 #ifndef SUMMARY_WAIT_SECONDS
-#define SUMMARY_WAIT_SECONDS 3 /* ile sekund czekamy na podsumowania na koniec */
+#define SUMMARY_WAIT_SECONDS 2 /* ile sekund czekamy na podsumowania na koniec */
 #endif
 
 #ifndef SHUTDOWN_TERM_TIMEOUT
@@ -70,7 +70,7 @@ static inline int rest_nanosleep(const struct timespec *req, struct timespec *re
 #define MAX_TASMA 150                                 // maksymalna długość taśmy
 #define MAX_GRUP_NA_STOLIKU 4                         // maksymalna liczba grup na jednym stoliku
 #define TP 10                                         // godzina otwarcia restauracji
-#define TK 22                                         // godzina zamknięcia restauracji
+#define TK 15                                         // godzina zamknięcia restauracji
 #ifndef CZAS_PRACY
 #define CZAS_PRACY (TK - TP) // czas otwarcia restauracji w sekundach
 #endif
