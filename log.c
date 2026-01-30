@@ -63,7 +63,7 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
     if (!path || !*path)
     {
         path = log_default_path();
-        // Export for fork/exec children so they use the same file.
+        // Ustaw zmienną środowiskową dla fork/exec potomków, aby używały tego samego pliku.
         (void)setenv("RESTAURACJA_LOG_FILE", path, 0);
     }
 
@@ -75,7 +75,7 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
     if (fd >= 0)
     {
 #ifndef O_CLOEXEC
-        // Best-effort fallback: ensure the FD is closed on exec() to avoid leaking it to children.
+        // Fallback: postaraj się ustawić FD_CLOEXEC, żeby nie przeciekał do procesów potomnych.
         int old_flags = fcntl(fd, F_GETFD);
         if (old_flags != -1)
             (void)fcntl(fd, F_SETFD, old_flags | FD_CLOEXEC);

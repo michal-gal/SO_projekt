@@ -8,30 +8,30 @@
 #include <sys/msg.h>
 #include <unistd.h>
 
-// Global shutdown flag
+// Globalna flaga zamknięcia
 static volatile sig_atomic_t shutdown_requested = 0;
 
-// Forward declarations
+// Deklaracje wstępne
 static void kierownik_obsluz_sigterm(int signo);
 static void kierownik_wyslij_sygnal(void);
 
-// Signal handler for SIGTERM
+// Handler sygnału SIGTERM
 static void kierownik_obsluz_sigterm(int signo)
 {
     (void)signo;
     shutdown_requested = 1;
 }
 
-// Send signal to obsluga or close restaurant
+// Wysyłanie sygnału do `obsluga` lub zamknięcie restauracji
 static void kierownik_wyslij_sygnal(void)
 {
-    // Use signals to communicate with obsluga:
-    // - SIGUSR1: increase performance
-    // - SIGUSR2: decrease performance
-    // - SIGTERM: close restaurant and terminate clients
-    // Other values = no action (normal operation).
-    int random_value = rand() % 1000000;                     // Make signals ~10x rarer
-    pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0; // Get obsluga PID from shared memory
+    // Używaj sygnałów do komunikacji z `obsluga`:
+    // - SIGUSR1: zwiększ wydajność
+    // - SIGUSR2: zmniejsz wydajność
+    // - SIGTERM: zamknij restaurację i zakończ klientów
+    // Inne wartości = brak akcji (normalne działanie).
+    int random_value = rand() % 1000000;                     // Zmniejsz częstotliwość sygnałów ~10x
+    pid_t pid_obsl = pid_obsluga_shm ? *pid_obsluga_shm : 0; // Pobierz PID procesu `obsluga` z pamięci współdzielonej
 
     if (random_value == 1) // ~0.0001% chance for SIGUSR1
     {
@@ -78,15 +78,15 @@ void kierownik(void)
 
     zainicjuj_losowosc();
 
-    // Set signal handler
+    // Ustaw handler sygnału
     if (signal(SIGTERM, kierownik_obsluz_sigterm) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
 
     ustaw_shutdown_flag(&shutdown_requested);
 
-    // Periodically perform manager actions when woken via SEM_KIEROWNIK.
-    // Restauracja (or any controller) may post SEM_KIEROWNIK to trigger
-    // kierownik_wyslij_sygnal() which sends occasional signals to obsluga.
+    // Okresowo wykonuj akcje kierownika po wybudzeniu przez SEM_KIEROWNIK.
+    // Restauracja (lub inny kontroler) może zasygnalizować SEM_KIEROWNIK, aby
+    // wywołać `kierownik_wyslij_sygnal()`, które wysyła okazjonalne sygnały do `obsluga`.
     while (*restauracja_otwarta && !shutdown_requested)
     {
         LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
@@ -101,11 +101,10 @@ void kierownik(void)
 
     LOGS("Kierownik kończy pracę.\n");
 
-    fsync(STDOUT_FILENO); // Ensure logs are flushed
+    fsync(STDOUT_FILENO); // Wymuś zapis logów
     exit(0);
 }
-
-// Main entry point
+// Główny punkt wejścia
 int main(int argc, char **argv)
 {
     if (argc != 4)

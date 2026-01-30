@@ -417,7 +417,6 @@ void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
             queue_sync->count++;
             /* Zliczamy rzeczywistą liczbę klientów (osób), nie tylko grup. */
             (*klienci_w_kolejce) += msg.grupa.osoby;
-            LOGD("kolejka_dodaj: pid=%d sent message pid=%d\n", (int)getpid(), msg.grupa.proces_id);
             pthread_cond_signal(&queue_sync->not_empty);
             pthread_mutex_unlock(&queue_sync->mutex);
             return;

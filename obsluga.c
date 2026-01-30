@@ -7,18 +7,18 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-// Global variables for performance and shutdown
-static volatile sig_atomic_t obsluga_wydajnosc = 2; // 1=slow, 2=normal, 4=fast
+// Zmienne globalne dotyczące wydajności i zakończenia
+static volatile sig_atomic_t obsluga_wydajnosc = 2; // 1=wolno, 2=normalnie, 4=szybko
 static volatile sig_atomic_t shutdown_requested = 0;
 
-// Forward declarations
+// Deklaracje wstępne
 static void obsluga_podaj_dania_normalne(double wydajnosc);
 static void *watek_specjalne(void *arg);
 static void *watek_podsumowanie(void *arg);
 static void obsluz_sygnal(int signo);
 static void wypisz_podsumowanie(void);
 
-// Thread for handling queue seating
+// Wątek obsługi kolejki (usadzanie)
 static void *watek_kolejki(void *arg)
 {
     (void)arg;
@@ -69,7 +69,7 @@ static void *watek_kolejki(void *arg)
     return NULL;
 }
 
-// Thread for serving normal dishes
+// Wątek podawania dań normalnych
 static void *watek_podawania(void *arg)
 {
     (void)arg;
@@ -97,13 +97,14 @@ static void *watek_podawania(void *arg)
     return NULL;
 }
 
-// Thread for handling special orders
+// Wątek obsługi zamówień specjalnych
 static void *watek_specjalne(void *arg)
 {
     (void)arg;
     while (*restauracja_otwarta && !shutdown_requested)
     {
-        // Handle special orders: reserve in tables first, then add to belt, then clear reservations
+        // Obsługa zamówień specjalnych: najpierw rezerwuj przy stolikach,
+        // potem dodaj na taśmę, następnie usuń rezerwacje
         int spec_ceny[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
         int spec_numer_stolika[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
         int spec_stolik_idx[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
@@ -114,7 +115,7 @@ static void *watek_specjalne(void *arg)
         if (pthread_mutex_lock(&stoliki_sync->mutex) != 0)
             continue;
 
-        /* Scan once: reserve any newly requested special dishes. */
+        /* Jednorazowe skanowanie: zarezerwuj nowo zgłoszone zamówienia specjalne. */
         for (int stolik = 0; stolik < MAX_STOLIKI; stolik++)
         {
             for (int grupa = 0; grupa < stoliki[stolik].liczba_grup; grupa++)
@@ -134,7 +135,7 @@ static void *watek_specjalne(void *arg)
 
         if (spec_cnt == 0 && *restauracja_otwarta && !shutdown_requested)
         {
-            /* No specials now – wait until someone signals a change. */
+            /* Brak zamówień specjalnych – poczekaj na sygnał zmiany. */
             (void)pthread_cond_wait(&stoliki_sync->cond, &stoliki_sync->mutex);
             pthread_mutex_unlock(&stoliki_sync->mutex);
             continue;
@@ -172,7 +173,7 @@ static void *watek_specjalne(void *arg)
     return NULL;
 }
 
-// Thread for printing summary at the end
+// Wątek drukujący podsumowanie na końcu
 static void *watek_podsumowanie(void *arg)
 {
     (void)arg;
@@ -181,7 +182,7 @@ static void *watek_podsumowanie(void *arg)
 
     czekaj_na_ture(1, &ignore_shutdown);
 
-    /* Wait for restaurant to close; use stoliki_sync cond to avoid polling. */
+    /* Poczekaj na zamknięcie restauracji; użyj stoliki_sync.cond aby uniknąć aktywnego oczekiwania. */
     if (pthread_mutex_lock(&stoliki_sync->mutex) == 0)
     {
         while (*restauracja_otwarta)
@@ -201,11 +202,11 @@ static void *watek_podsumowanie(void *arg)
     *kolej_podsumowania = 2;
     sygnalizuj_ture();
 
-    fsync(STDOUT_FILENO); // Ensure logs are flushed
+    fsync(STDOUT_FILENO); // Wymuś zapis wszystkich logów podsumowania
     return NULL;
 }
 
-// Signal handler
+// Obsługa sygnałów
 static void obsluz_sygnal(int signo)
 {
     switch (signo)

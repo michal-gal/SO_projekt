@@ -32,7 +32,7 @@ static void drukuj_podsumowanie_kuchni(void)
     }
     LOGS("\nSuma: %d zł\n", kuchnia_suma);
 
-    fsync(STDOUT_FILENO); // Ensure all summary logs are flushed
+        fsync(STDOUT_FILENO); // Wymuś zapis wszystkich logów podsumowania
 }
 
 // Główna funkcja kucharza
@@ -62,7 +62,7 @@ void kucharz(void)
     *kolej_podsumowania = 3;
     sygnalizuj_ture();
 
-    fsync(STDOUT_FILENO); // Ensure logs are flushed
+    fsync(STDOUT_FILENO); // Wymuś zapis logów
     exit(0);
 }
 

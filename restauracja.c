@@ -258,7 +258,7 @@ int main(int argc, char **argv)
 {
     // Domyślne wartości
     int default_klienci = CLIENTS_TO_CREATE;
-    int default_czas = 10;
+    int default_czas = CZAS_PRACY;
     int default_log = 1;
 
     // Parsowanie argumentów (opcjonalne)
@@ -365,7 +365,7 @@ int main(int argc, char **argv)
     // Ponieważ dzieci są w osobnej grupie, forwardujemy je, żeby program reagował jak użytkownik oczekuje.
     signal(SIGINT, restauracja_on_sigint);   // handler dla SIGINT/SIGQUIT
     signal(SIGQUIT, restauracja_on_sigint);  // handler dla SIGINT/SIGQUIT
-    signal(SIGTERM, restauracja_on_sigint);  // handler dla SIGTERM (eg. timeout)
+    signal(SIGTERM, restauracja_on_sigint);  // handler dla SIGTERM (np. timeout)
     signal(SIGTSTP, restauracja_on_sigtstp); // handler dla SIGTSTP
     signal(SIGCONT, restauracja_on_sigcont); // handler dla SIGCONT
 
