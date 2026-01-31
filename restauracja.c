@@ -25,6 +25,37 @@ static inline long elapsed_seconds_since(const struct timespec *start)
     return now.tv_sec - start->tv_sec;
 }
 
+/* (Removed parse_env_positive) */
+
+/* Helper: parse positive integer strictly from argv; returns -1 on error. */
+static long parse_arg_positive_or_error(const char *s)
+{
+    if (!s)
+        return -1;
+    errno = 0;
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0' || v <= 0)
+        return -1;
+    return v;
+}
+
+/* Helper: parse integer from environment with inclusive range [min,max].
+ * If env var is unset or invalid, returns `fallback`.
+ * Use `max < 0` to indicate no upper bound. */
+static int parse_env_int_range(const char *name, int fallback, int min, int max)
+{
+    const char *s = getenv(name);
+    if (!s || !*s)
+        return fallback;
+    errno = 0;
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (errno == 0 && end && *end == '\0' && v >= min && (max < 0 || v <= max))
+        return (int)v;
+    return fallback;
+}
+
 // ====== ZMIENNE GLOBALNE ======
 
 /* Per-run context to reduce scattered globals. */
@@ -320,27 +351,14 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
  */
 int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 {
-    int default_klienci = 10;
-    int default_czas = CZAS_PRACY;
-    int default_log = LOG_LEVEL_DEFAULT;
+    int klienci = LICZBA_GRUP_DEFAULT;
+    int czas = CZAS_PRACY_DEFAULT;
+    int log_level = LOG_LEVEL_DEFAULT;
 
-    /* Read default client count from environment. If not set or invalid,
-     * fall back to 10. This removes compile-time macro dependency. */
-    const char *clients_env = getenv("RESTAURACJA_LICZBA_KLIENTOW");
-    if (clients_env && *clients_env)
-    {
-        errno = 0;
-        char *end = NULL;
-        long v = strtol(clients_env, &end, 10);
-        if (errno == 0 && end && *end == '\0' && v > 0)
-            default_klienci = (int)v;
-        else
-            default_klienci = 10;
-    }
-    else
-    {
-        default_klienci = 10;
-    }
+    /* Read defaults from environment (lenient) with validation. */
+    klienci = parse_env_int_range("RESTAURACJA_LICZBA_KLIENTOW", klienci, 1, -1);
+    log_level = parse_env_int_range("RESTAURACJA_LOG_LEVEL", log_level, 0, 2);
+    czas = parse_env_int_range("RESTAURACJA_CZAS_PRACY", czas, 1, -1);
 
     if (argc < 1 || argc > 4)
     {
@@ -348,51 +366,41 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
                 "Użycie: %s [<liczba_klientow>] [<czas_sekund>] [<log_level>]\n",
                 argv[0]);
         fprintf(stderr, "Domyślne: %d klientów, %d sekund, log level %d\n",
-                default_klienci, default_czas, default_log);
+                klienci, czas, log_level);
         return 1;
     }
 
-    int klienci = default_klienci;
-    int czas = default_czas;
-    int log_level = default_log;
-
     if (argc >= 2)
     {
-        errno = 0;
-        char *end = NULL;
-        long val = strtol(argv[1], &end, 10);
-        if (errno != 0 || end == argv[1] || *end != '\0' || val <= 0)
+        long v = parse_arg_positive_or_error(argv[1]);
+        if (v < 0)
         {
             fprintf(stderr, "Błędna liczba klientów: %s\n", argv[1]);
             return 1;
         }
-        klienci = (int)val;
+        klienci = (int)v;
     }
 
     if (argc >= 3)
     {
-        errno = 0;
-        char *end = NULL;
-        long val = strtol(argv[2], &end, 10);
-        if (errno != 0 || end == argv[2] || *end != '\0' || val <= 0)
+        long v = parse_arg_positive_or_error(argv[2]);
+        if (v < 0)
         {
             fprintf(stderr, "Błędny czas w sekundach: %s\n", argv[2]);
             return 1;
         }
-        czas = (int)val;
+        czas = (int)v;
     }
 
     if (argc >= 4)
     {
-        errno = 0;
-        char *end = NULL;
-        long val = strtol(argv[3], &end, 10);
-        if (errno != 0 || end == argv[3] || *end != '\0' || val < 0 || val > 2)
+        long v = parse_arg_positive_or_error(argv[3]);
+        if (v < 0 || v > 2)
         {
             fprintf(stderr, "Błędny log level (0-2): %s\n", argv[3]);
             return 1;
         }
-        log_level = (int)val;
+        log_level = (int)v;
     }
 
     /* Set the single authoritative client count for this run. */
@@ -400,38 +408,16 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     czas_pracy_domyslny = czas;
     current_log_level = log_level;
 
-    char log_level_str[2];
-    /* Read log level from environment by default (overridable by argv[3]).
-     * Valid values: 0-2. If unset or invalid, fallback to 1. */
-    const char *log_env = getenv("RESTAURACJA_LOG_LEVEL");
-    if (log_env && *log_env)
-    {
-        errno = 0;
-        char *end = NULL;
-        long v = strtol(log_env, &end, 10);
-        if (errno == 0 && end && *end == '\0' && v >= 0 && v <= 2)
-            log_level = (int)v;
-        else
-            log_level = 1;
-    }
+    char log_level_str[3];
+    /* Finalize log level and export to logger via LOG_LEVEL env var. */
     snprintf(log_level_str, sizeof(log_level_str), "%d", log_level);
     setenv("LOG_LEVEL", log_level_str, 1);
 
     zainicjuj_losowosc();
 
-    int czas_pracy = czas_pracy_domyslny;
-    const char *czas_env = getenv("RESTAURACJA_CZAS_PRACY");
-    if (czas_env && *czas_env)
-    {
-        errno = 0;
-        char *end = NULL;
-        long v = strtol(czas_env, &end, 10);
-        if (errno == 0 && end && *end == '\0' && v > 0)
-            czas_pracy = (int)v;
-    }
     /* Ensure the global default reflects the final chosen runtime so there
      * is a single authoritative source for "czas pracy" across modules. */
-    czas_pracy_domyslny = czas_pracy;
+    czas_pracy_domyslny = czas;
 
     stworz_ipc();
     generator_stolikow(common_ctx->stoliki);
@@ -447,6 +433,15 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     *common_ctx->kolej_podsumowania = 1;
     sygnalizuj_ture();
 
+    /* Register signal handlers early, before launching child processes, so
+     * the parent can respond to interrupts during startup and while
+     * creating children. */
+    signal(SIGINT, restauracja_signal_handler);
+    signal(SIGQUIT, restauracja_signal_handler);
+    signal(SIGTERM, restauracja_signal_handler);
+    signal(SIGTSTP, restauracja_signal_handler);
+    signal(SIGCONT, restauracja_signal_handler);
+
     {
         pid_t p = launch_child_and_set_group("./obsluga", "obsluga", 0, 0,
                                              common_ctx->pid_obsluga_shm, 1);
@@ -454,12 +449,6 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
         if (common_ctx->pid_obsluga < 0)
             return awaryjne_zamkniecie_fork();
     }
-
-    signal(SIGINT, restauracja_signal_handler);
-    signal(SIGQUIT, restauracja_signal_handler);
-    signal(SIGTERM, restauracja_signal_handler);
-    signal(SIGTSTP, restauracja_signal_handler);
-    signal(SIGCONT, restauracja_signal_handler);
 
     {
         pid_t p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
@@ -478,7 +467,7 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     }
 
     if (out_czas_pracy)
-        *out_czas_pracy = czas_pracy;
+        *out_czas_pracy = czas_pracy_domyslny;
     return 0;
 }
 
@@ -531,7 +520,10 @@ int run_restauracja(int czas_pracy)
     int status;
 
     int zforkowane_grupy = 0;
-    int max_aktywnych_klientow = MAX_AKTYWNYCH_KLIENTOW_DEFAULT;
+    /* Default cap for concurrently active clients: prefer the configured
+     * total `liczba_klientow` when it's set (so the cap follows the total),
+     * otherwise fall back to the compile-time default. Env var can override. */
+    int max_aktywnych_klientow = (liczba_klientow > 0) ? liczba_klientow : 5000;
     const char *max_env = getenv("RESTAURACJA_MAX_AKTYWNYCH_KLIENTOW");
     if (max_env && *max_env)
     {
