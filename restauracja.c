@@ -1,9 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
 
-#ifndef CLIENTS_TO_CREATE
-#define CLIENTS_TO_CREATE 10
-#endif
-
 #include "restauracja.h" /* includes common.h */
 
 #include <stdio.h>
@@ -324,9 +320,27 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
  */
 int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 {
-    int default_klienci = CLIENTS_TO_CREATE;
+    int default_klienci = 10;
     int default_czas = CZAS_PRACY;
     int default_log = 1;
+
+    /* Read default client count from environment. If not set or invalid,
+     * fall back to 10. This removes compile-time macro dependency. */
+    const char *clients_env = getenv("RESTAURACJA_LICZBA_KLIENTOW");
+    if (clients_env && *clients_env)
+    {
+        errno = 0;
+        char *end = NULL;
+        long v = strtol(clients_env, &end, 10);
+        if (errno == 0 && end && *end == '\0' && v > 0)
+            default_klienci = (int)v;
+        else
+            default_klienci = 10;
+    }
+    else
+    {
+        default_klienci = 10;
+    }
 
     if (argc < 1 || argc > 4)
     {
@@ -386,6 +400,19 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     current_log_level = log_level;
 
     char log_level_str[2];
+    /* Read log level from environment by default (overridable by argv[3]).
+     * Valid values: 0-2. If unset or invalid, fallback to 1. */
+    const char *log_env = getenv("RESTAURACJA_LOG_LEVEL");
+    if (log_env && *log_env)
+    {
+        errno = 0;
+        char *end = NULL;
+        long v = strtol(log_env, &end, 10);
+        if (errno == 0 && end && *end == '\0' && v >= 0 && v <= 2)
+            log_level = (int)v;
+        else
+            log_level = 1;
+    }
     snprintf(log_level_str, sizeof(log_level_str), "%d", log_level);
     setenv("LOG_LEVEL", log_level_str, 1);
 

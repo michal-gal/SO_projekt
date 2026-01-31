@@ -1,20 +1,18 @@
 CC = gcc
 
 # Build-time configurable values (override on make command line):
-#   make CLIENTS_TO_CREATE=500 ...
-# Backwards-compatible: `LICZBA_GRUP` mirrors `CLIENTS_TO_CREATE` unless set explicitly.
-LOG_LEVEL ?= 1
-CLIENTS_TO_CREATE ?= 5000
-LICZBA_GRUP ?= $(CLIENTS_TO_CREATE)
-CZAS_PRACY_SEKUNDY ?= 60
+# Historically this Makefile allowed overriding defaults like client count
+# at compile time. Defaults are now read at runtime from environment
+# variables (RESTAURACJA_LICZBA_KLIENTOW, RESTAURACJA_LOG_LEVEL,
+# RESTAURACJA_CZAS_PRACY). Leave compiler flags minimal.
 
 # Compiler/linker flags
 CFLAGS = -Wall -g
-CFLAGS += -DLOG_LEVEL=$(LOG_LEVEL)
 CFLAGS += # MAX_LOSOWYCH_GRUP and CLIENTS_TO_CREATE are controlled at runtime via program arguments
-# Pass CLIENTS_TO_CREATE from Makefile into compile-time macro so default can be adjusted via make
-CFLAGS += -DCLIENTS_TO_CREATE=$(CLIENTS_TO_CREATE)
-CFLAGS += -DCZAS_PRACY=$(CZAS_PRACY_SEKUNDY)
+# Do not pass CLIENTS_TO_CREATE as a compile-time macro anymore.
+# The program reads default client count from environment variable
+# RESTAURACJA_LICZBA_KLIENTOW at runtime.
+CFLAGS += # LOG_LEVEL and CZAS_PRACY are read from environment at runtime
 CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread
 
@@ -84,9 +82,9 @@ test: all
 help:
 	@echo "Usage: make [VAR=value]"
 	@echo "Variables you can override:"
-	@echo "  CLIENTS_TO_CREATE   - (removed) use program args instead: ./restauracja <clients> <time> <log>"
-	@echo "  LICZBA_GRUP         - (removed) alias; use runtime client count as first arg"
-	@echo "  CZAS_PRACY_SEKUNDY  - default working time passed to program at compile-time (default=$(CZAS_PRACY_SEKUNDY))"
+	@echo "  RESTAURACJA_LICZBA_KLIENTOW - default client count (env)"
+	@echo "  RESTAURACJA_LOG_LEVEL       - log level (env)"
+	@echo "  RESTAURACJA_CZAS_PRACY      - runtime working time (env)"
 	@echo "Examples:"
-	@echo "  make CLIENTS_TO_CREATE=500"
-	@echo "  make LOG_LEVEL=2"
+	@echo "  export RESTAURACJA_LICZBA_KLIENTOW=500; ./restauracja"
+	@echo "  export RESTAURACJA_LOG_LEVEL=2; ./restauracja"
