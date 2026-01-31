@@ -182,7 +182,6 @@ void dolacz_ipc(int shm_id_existing, int sem_id_existing);
 int cena_na_indeks(int cena);
 int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g);
 void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown);
-void sygnalizuj_ture(void);
 void sygnalizuj_ture_na(int turn);
 int sem_timedwait_seconds(int sem_idx, int seconds);
 int parsuj_int_lub_zakoncz(const char *what, const char *s);

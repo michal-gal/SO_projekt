@@ -140,11 +140,7 @@ int sem_timedwait_seconds(int sem_idx, int seconds)
     return -1;
 }
 
-void sygnalizuj_ture(void) // sygnalizuje zmianę tury podsumowania
-{
-    /* Legacy wrapper: signal the generic open token (fallback) */
-    sygnalizuj_ture_na(0);
-}
+/* legacy wrapper removed: use sygnalizuj_ture_na(turn) directly */
 
 void sygnalizuj_ture_na(int turn)
 {
