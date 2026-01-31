@@ -16,7 +16,7 @@ struct CommonCtx *common_ctx = &common_ctx_storage;
 int max_losowych_grup = MAX_LOSOWYCH_GRUP;
 int czas_pracy_domyslny = CZAS_PRACY;
 
-// ====== ZMIENNE GLOBALNE (migrated into CommonCtx) ======
+// ====== ZMIENNE GLOBALNE  ======
 
 const int ILOSC_STOLIKOW[4] = {X1, X2, X3,
                                X4};                     // liczba stolików o pojemności 1,2,3,4
@@ -164,10 +164,10 @@ void dodaj_danie(struct Talerzyk *tasma_local,
 
     tasma_local[0].cena = cena;
     tasma_local[0].stolik_specjalny = 0;
-        common_ctx->tasma_sync->count++;
-        pthread_cond_signal(&common_ctx->tasma_sync->not_empty);
-        LOGD("dodaj_danie: wydano danie za %d zł na taśmę (count=%d)\n", cena,
-            common_ctx->tasma_sync->count);
+    common_ctx->tasma_sync->count++;
+    pthread_cond_signal(&common_ctx->tasma_sync->not_empty);
+    LOGD("dodaj_danie: wydano danie za %d zł na taśmę (count=%d)\n", cena,
+         common_ctx->tasma_sync->count);
 }
 
 // ====== OPERACJE IPC ======
@@ -211,10 +211,10 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
         sizeof(struct TasmaSync) +   // synchronizacja taśmy
         sizeof(struct QueueSync);    // synchronizacja kolejki
 
-        common_ctx->shm_id = shmget(IPC_PRIVATE, bufor_size,
-                        IPC_CREAT | 0600); // utwórz pamięć współdzieloną
-        void *pamiec_wspoldzielona =
-            shmat(common_ctx->shm_id, NULL, 0); // dołącz pamięć współdzieloną
+    common_ctx->shm_id = shmget(IPC_PRIVATE, bufor_size,
+                                IPC_CREAT | 0600); // utwórz pamięć współdzieloną
+    void *pamiec_wspoldzielona =
+        shmat(common_ctx->shm_id, NULL, 0); // dołącz pamięć współdzieloną
     if (pamiec_wspoldzielona == (void *)-1)
     {
         LOGE_ERRNO("shmat");
@@ -222,22 +222,21 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     }
     memset(pamiec_wspoldzielona, 0, bufor_size); // wyczyść pamięć współdzieloną
 
-        common_ctx->stoliki = (struct Stolik *)pamiec_wspoldzielona;    // wskaźnik na stoliki
-        common_ctx->tasma = (struct Talerzyk *)(common_ctx->stoliki + MAX_STOLIKI); // wskaźnik na taśmę
-        common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA); // kuchnia - liczba wydanych dań
-        common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6; // kasa - liczba sprzedanych dań
-        common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6; // flaga czy restauracja jest otwarta
-        common_ctx->kolej_podsumowania = common_ctx->restauracja_otwarta + 1; // kolejka podsumowania
-        common_ctx->klienci_w_kolejce = common_ctx->kolej_podsumowania + 1;   // statystyka: klienci w kolejce
-        common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;     // statystyka: klienci przyjęci
-        common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1; // statystyka: klienci którzy opuścili
+    common_ctx->stoliki = (struct Stolik *)pamiec_wspoldzielona;                // wskaźnik na stoliki
+    common_ctx->tasma = (struct Talerzyk *)(common_ctx->stoliki + MAX_STOLIKI); // wskaźnik na taśmę
+    common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA);  // kuchnia - liczba wydanych dań
+    common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6;    // kasa - liczba sprzedanych dań
+    common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6;     // flaga czy restauracja jest otwarta
+    common_ctx->kolej_podsumowania = common_ctx->restauracja_otwarta + 1;       // kolejka podsumowania
+    common_ctx->klienci_w_kolejce = common_ctx->kolej_podsumowania + 1;         // statystyka: klienci w kolejce
+    common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;           // statystyka: klienci przyjęci
+    common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1;            // statystyka: klienci którzy opuścili
 
-        common_ctx->pid_obsluga_shm = (pid_t *)(common_ctx->klienci_opuscili + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
-        common_ctx->pid_kierownik_shm = common_ctx->pid_obsluga_shm + 1; // wskaźnik na PID procesu kierownika w pamięci współdzielonej
-        common_ctx->stoliki_sync = (struct StolikiSync *)(common_ctx->pid_kierownik_shm + 1);
-        common_ctx->tasma_sync = (struct TasmaSync *)(common_ctx->stoliki_sync + 1);
-        common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
-
+    common_ctx->pid_obsluga_shm = (pid_t *)(common_ctx->klienci_opuscili + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
+    common_ctx->pid_kierownik_shm = common_ctx->pid_obsluga_shm + 1;           // wskaźnik na PID procesu kierownika w pamięci współdzielonej
+    common_ctx->stoliki_sync = (struct StolikiSync *)(common_ctx->pid_kierownik_shm + 1);
+    common_ctx->tasma_sync = (struct TasmaSync *)(common_ctx->stoliki_sync + 1);
+    common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
 
     common_ctx->tasma_sync->count = 0;
     pthread_mutexattr_t mattr;
@@ -301,7 +300,7 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     (void)pthread_condattr_destroy(&cattr);
 
     common_ctx->sem_id = semget(IPC_PRIVATE, 2,
-                    IPC_CREAT | 0600);        // utwórz semafory (tura + kierownik)
+                                IPC_CREAT | 0600);        // utwórz semafory (tura + kierownik)
     semctl(common_ctx->sem_id, SEM_TURA, SETVAL, 0);      // semafor sygnalizujący zmianę tury
     semctl(common_ctx->sem_id, SEM_KIEROWNIK, SETVAL, 0); // semafor wybudzający kierownika
 
@@ -506,17 +505,17 @@ struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
         /* Jeśli odbiór się nie udał, przywróć token i obsłuż błędy. */
         LOGD("kolejka_pobierz: pid=%d msgrcv failed errno=%d\n", (int)getpid(),
              errno);
-            if (errno == EINTR)
+        if (errno == EINTR)
+        {
+            /* Przywróć count, ponieważ wiadomość nie została zużyta. */
+            if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) == 0)
             {
-                /* Przywróć count, ponieważ wiadomość nie została zużyta. */
-                if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) == 0)
-                {
-                    common_ctx->queue_sync->count++;
-                    pthread_cond_signal(&common_ctx->queue_sync->not_empty);
-                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-                }
-                continue;
+                common_ctx->queue_sync->count++;
+                pthread_cond_signal(&common_ctx->queue_sync->not_empty);
+                pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
             }
+            continue;
+        }
         if (errno == ENOMSG)
         {
             /* Count był przestarzały; przywróć licznik i spróbuj ponownie. */

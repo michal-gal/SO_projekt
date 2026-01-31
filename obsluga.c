@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include <sched.h>
+#include <unistd.h>
 #include <stdlib.h>
 
 // Per-module context for obsluga

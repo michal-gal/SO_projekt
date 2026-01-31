@@ -6,10 +6,12 @@
 
 #include "restauracja.h" /* includes common.h */
 
+#include <stdio.h>
 /* Additional system headers not included via common.h */
 #include <errno.h>
 #include <sched.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/sem.h>
@@ -77,29 +79,34 @@ static const char *nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstaw
     }
 }
 
-static void restauracja_on_sigint(int signo) // handler dla SIGINT/SIGQUIT
+/* Single signal handler that consolidates SIGINT/SIGQUIT/SIGTERM, SIGTSTP
+ * and SIGCONT behavior. Keeping this local to the module keeps the
+ * implementation details (and `ctx`) encapsulated in `restauracja.c`.
+ */
+static void restauracja_signal_handler(int signo)
 {
-    (void)signo;
-    ctx->sigint_requested = 1;
-    ctx->shutdown_signal = signo;
-    if (ctx->children_pgid > 0)
-        (void)kill(-ctx->children_pgid, SIGTERM);
-}
-
-static void restauracja_on_sigtstp(int signo) // handler dla SIGTSTP
-{
-    (void)signo;
-    if (ctx->children_pgid > 0)
-        (void)kill(-ctx->children_pgid, SIGTSTP);
-
-    (void)kill(getpid(), SIGSTOP);
-}
-
-static void restauracja_on_sigcont(int signo) // handler dla SIGCONT
-{
-    (void)signo;
-    if (ctx->children_pgid > 0)
-        (void)kill(-ctx->children_pgid, SIGCONT);
+    switch (signo)
+    {
+    case SIGINT:
+    case SIGQUIT:
+    case SIGTERM:
+        ctx->sigint_requested = 1;
+        ctx->shutdown_signal = signo;
+        if (ctx->children_pgid > 0)
+            (void)kill(-ctx->children_pgid, SIGTERM);
+        break;
+    case SIGTSTP:
+        if (ctx->children_pgid > 0)
+            (void)kill(-ctx->children_pgid, SIGTSTP);
+        (void)kill(getpid(), SIGSTOP);
+        break;
+    case SIGCONT:
+        if (ctx->children_pgid > 0)
+            (void)kill(-ctx->children_pgid, SIGCONT);
+        break;
+    default:
+        break;
+    }
 }
 
 // ====== ZARZĄDZANIE PROCESAMI ======
@@ -327,7 +334,7 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
  * On success returns 0 and sets *out_czas_pracy to the configured run time.
  * On failure returns non-zero (same as awaryjne_zamkniecie_fork()).
  */
-static int init_restauracja(int argc, char **argv, int *out_czas_pracy)
+int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 {
     int default_klienci = CLIENTS_TO_CREATE;
     int default_czas = CZAS_PRACY;
@@ -429,11 +436,11 @@ static int init_restauracja(int argc, char **argv, int *out_czas_pracy)
             return awaryjne_zamkniecie_fork();
     }
 
-    signal(SIGINT, restauracja_on_sigint);
-    signal(SIGQUIT, restauracja_on_sigint);
-    signal(SIGTERM, restauracja_on_sigint);
-    signal(SIGTSTP, restauracja_on_sigtstp);
-    signal(SIGCONT, restauracja_on_sigcont);
+    signal(SIGINT, restauracja_signal_handler);
+    signal(SIGQUIT, restauracja_signal_handler);
+    signal(SIGTERM, restauracja_signal_handler);
+    signal(SIGTSTP, restauracja_signal_handler);
+    signal(SIGCONT, restauracja_signal_handler);
 
     {
         pid_t p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
@@ -459,7 +466,7 @@ static int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 /* Centralized shutdown/cleanup sequence extracted from run_restauracja().
  * Accepts pointer to status to allow reusing zakoncz_wszystkie_dzieci(&status).
  */
-static int shutdown_restauracja(int *status)
+int shutdown_restauracja(int *status)
 {
     LOGD("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
 
@@ -498,7 +505,7 @@ static int shutdown_restauracja(int *status)
 }
 
 /* Run the main restaurant loop and perform shutdown/cleanup. Returns 0. */
-static int run_restauracja(int czas_pracy)
+int run_restauracja(int czas_pracy)
 {
     struct timespec start_czekania;
     clock_gettime(CLOCK_MONOTONIC, &start_czekania);

@@ -1,11 +1,11 @@
 #define _POSIX_C_SOURCE 200809L
 
-#define COMMON_NO_LEGACY_ALIASES
 #include "common.h"
 
 #include <sched.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // ====== TYPY ======
 

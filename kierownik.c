@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <sched.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <sys/msg.h>
 

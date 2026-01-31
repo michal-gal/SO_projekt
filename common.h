@@ -6,10 +6,8 @@
 
 #include <pthread.h>   // pthread_mutex_t, pthread_cond_t
 #include <signal.h>    // sig_atomic_t
-#include <stdio.h>     // printf
 #include <sys/types.h> // pid_t
-#include <time.h>      // time_t
-#include <unistd.h>    // sleep
+#include <time.h>      // time_t, nanosleep
 
 // ====== INLINE FUNKCJE ======
 /* removed unused wrappers rest_sleep/rest_nanosleep; use `sleep_ms()` or
