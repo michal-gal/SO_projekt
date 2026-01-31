@@ -13,7 +13,10 @@
 struct CommonCtx common_ctx_storage = {0};
 struct CommonCtx *common_ctx = &common_ctx_storage;
 
-int max_losowych_grup = MAX_LOSOWYCH_GRUP;
+/* Unified default for number of random groups is provided at runtime
+ * (RESTAURACJA_LICZBA_KLIENTOW). Initialize to 0 here so the
+ * runtime initializer (`init_restauracja`) sets the actual value. */
+int max_losowych_grup = 0;
 int czas_pracy_domyslny = CZAS_PRACY;
 
 // ====== ZMIENNE GLOBALNE  ======
