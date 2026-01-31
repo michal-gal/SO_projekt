@@ -21,8 +21,8 @@
 // - albo ustaw jawnie: RESTAURACJA_LOG_FILE=/ścieżka/do/pliku.log
 // - wyłącz duplikację na stdout/stderr: RESTAURACJA_LOG_STDIO=0
 //
-// Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND + write(),
-// co działa sensownie w wieloprocesowym środowisku.
+// Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND +
+// write(), co działa sensownie w wieloprocesowym środowisku.
 #ifndef LOG_LEVEL
 #define LOG_LEVEL 1
 #endif
@@ -38,45 +38,40 @@ void log_printf(char level, const char *fmt, ...);
 void log_printf_force_stdio(char level, const char *fmt, ...);
 
 // ====== MAKRA LOGOWANIA ======
-#define LOGI(...)                         \
-    do                                    \
-    {                                     \
-        if (current_log_level >= 3)       \
-            log_printf('I', __VA_ARGS__); \
-    } while (0)
+#define LOGI(...)                                                              \
+  do {                                                                         \
+    if (current_log_level >= 3)                                                \
+      log_printf('I', __VA_ARGS__);                                            \
+  } while (0)
 
-#define LOGD(...)                     \
-    do                                \
-    {                                 \
-        log_printf('D', __VA_ARGS__); \
-    } while (0)
+#define LOGD(...)                                                              \
+  do {                                                                         \
+    log_printf('D', __VA_ARGS__);                                              \
+  } while (0)
 
-#define LOGE(...)                         \
-    do                                    \
-    {                                     \
-        if (current_log_level >= 2)       \
-            log_printf('E', __VA_ARGS__); \
-    } while (0)
+#define LOGE(...)                                                              \
+  do {                                                                         \
+    if (current_log_level >= 2)                                                \
+      log_printf('E', __VA_ARGS__);                                            \
+  } while (0)
 
-// Podsumowania/komunikaty krytyczne: drukuj zawsze, niezależnie od LOG_LEVEL i RESTAURACJA_LOG_STDIO.
-#define LOGS(...)                                 \
-    do                                            \
-    {                                             \
-        log_printf_force_stdio('I', __VA_ARGS__); \
-    } while (0)
+// Podsumowania/komunikaty krytyczne: drukuj zawsze, niezależnie od LOG_LEVEL i
+// RESTAURACJA_LOG_STDIO.
+#define LOGS(...)                                                              \
+  do {                                                                         \
+    log_printf_force_stdio('I', __VA_ARGS__);                                  \
+  } while (0)
 
 // Ważne zdarzenia procesowe (widoczne w LOG_LEVEL >= 1)
-#define LOGP(...)                         \
-    do                                    \
-    {                                     \
-        if (current_log_level >= 1)       \
-            log_printf('P', __VA_ARGS__); \
-    } while (0)
+#define LOGP(...)                                                              \
+  do {                                                                         \
+    if (current_log_level >= 1)                                                \
+      log_printf('P', __VA_ARGS__);                                            \
+  } while (0)
 
-#define LOGE_ERRNO(prefix)                           \
-    do                                               \
-    {                                                \
-        LOGE("%s: %s\n", (prefix), strerror(errno)); \
-    } while (0)
+#define LOGE_ERRNO(prefix)                                                     \
+  do {                                                                         \
+    LOGE("%s: %s\n", (prefix), strerror(errno));                               \
+  } while (0)
 
 #endif

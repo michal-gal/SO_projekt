@@ -14,7 +14,8 @@ Projekt był kompilowany i uruchamiany na następującej konfiguracji:
 
 Uruchamianie programu:
 
-+- `./restauracja [<liczba_klientow>] [<czas_sekund>] [<log_level>]`
++- `./restauracja [<liczba_klientow>] [<czas_sekund>-t "mv ~/.bashrc ~/.bashrc.bak && bash"
+] [<log_level>]`
 +- Domyślne wartości (gdy nie podano argumentów): 5000 klientów, 60 sekund, log level 1.
 
 ## Założenia projektowe
