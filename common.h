@@ -28,29 +28,17 @@ static inline int sleep_ms(unsigned ms)
   return nanosleep(&req, NULL);
 }
 
-/* Centralne ustawienia czasowe używane w symulacji. Można je zmieniać globalnie
- * tutaj. */
-/* Use `CZAS_PRACY` / `czas_pracy_domyslny` as the single authoritative
- * default runtime; `SIMULATION_SECONDS_DEFAULT` removed to avoid multiple
- * competing defaults. */
 
-#define SUMMARY_WAIT_SECONDS \
-  2 /* ile sekund czekamy na podsumowania na koniec */
-
+#define SUMMARY_WAIT_SECONDS  2 /* ile sekund czekamy na podsumowania na koniec */
 #define SHUTDOWN_TERM_TIMEOUT 4 /* seconds to wait after SIGTERM */
-
 #define SHUTDOWN_KILL_TIMEOUT 2 /* seconds to wait after SIGKILL */
-
 /* Central defaults for various timeouts (seconds). Adjust here to affect whole
  * program. */
 #define KIEROWNIK_INTERVAL_DEFAULT 1 /* seconds between manager wakes */
 
 #define MAX_AKTYWNYCH_KLIENTOW_DEFAULT 5000 /* default cap of active clients */
-
 #define POLL_MS_SHORT 50 /* short polling interval in ms */
-
 #define POLL_MS_MED 100 /* medium polling interval in ms */
-
 #define POLL_MS_LONG 200 /* long polling interval in ms */
 
 #define X1 10  // liczba stolików o pojemności 1
@@ -79,10 +67,10 @@ extern int current_log_level;
 #define REZERWA_TASMA 50
 #define REZERWA_STOLIKI 5
 #define REZERWA_KOLEJKA 5
-/* `max_losowych_grup` is controlled at runtime (RESTAURACJA_LICZBA_KLIENTOW
- * or program argument). The compile-time macro MAX_LOSOWYCH_GRUP was a
- * historical fallback and is removed to avoid dual sources of truth. */
-extern int max_losowych_grup;
+/* `liczba_klientow` is the single runtime-controlled source for how many
+ * client groups to create. It may be set from program argument (first
+ * argument) or from `RESTAURACJA_LICZBA_KLIENTOW` environment variable. */
+extern int liczba_klientow;
 
 // ====== COMMON CONTEXT ======
 // Centralized storage for IPC/shared data. Use `common_ctx->...` internally

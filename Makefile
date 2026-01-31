@@ -8,7 +8,7 @@ CC = gcc
 
 # Compiler/linker flags
 CFLAGS = -Wall -g
-CFLAGS += # MAX_LOSOWYCH_GRUP and CLIENTS_TO_CREATE are controlled at runtime via program arguments
+CFLAGS += # CLIENTS are controlled at runtime via program arguments / env
 # Do not pass CLIENTS_TO_CREATE as a compile-time macro anymore.
 # The program reads default client count from environment variable
 # RESTAURACJA_LICZBA_KLIENTOW at runtime.

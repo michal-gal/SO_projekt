@@ -395,7 +395,8 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
         log_level = (int)val;
     }
 
-    max_losowych_grup = klienci;
+    /* Set the single authoritative client count for this run. */
+    liczba_klientow = klienci;
     czas_pracy_domyslny = czas;
     current_log_level = log_level;
 
@@ -545,7 +546,7 @@ int run_restauracja(int czas_pracy)
     if (disable_env && strcmp(disable_env, "1") == 0)
         common_ctx->disable_close = 1;
     int aktywni_klienci = 0;
-    int liczba_utworzonych_grup = max_losowych_grup;
+    int liczba_utworzonych_grup = liczba_klientow;
 
     int kierownik_interval = KIEROWNIK_INTERVAL_DEFAULT;
     const char *kier_env = getenv("RESTAURACJA_KIEROWNIK_INTERVAL");
