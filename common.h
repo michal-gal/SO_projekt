@@ -132,7 +132,7 @@ struct CommonCtx
   struct TasmaSync *tasma_sync;
   struct StolikiSync *stoliki_sync;
   struct QueueSync *queue_sync;
-  int *kolej_podsumowania;
+  /* Removed: int *kolej_podsumowania; use semaphores for turn notifications */
   int *klienci_w_kolejce;
   int *klienci_przyjeci;
   int *klienci_opuscili;
@@ -153,6 +153,17 @@ extern const int CENY_DAN[6];
 /* Semaphore indices used across modules */
 #define SEM_TURA 0
 #define SEM_KIEROWNIK 1
+/* Additional semaphores used for explicit "turns" (1..3). These provide
+ * dedicated tokens that waiting processes can consume instead of relying
+ * on a shared integer flag. Using separate indices keeps backward
+ * compatibility with the existing SEM_TURA (open token). */
+#define SEM_TURA_TURN1 2
+#define SEM_TURA_TURN2 3
+#define SEM_TURA_TURN3 4
+/* Parent notification semaphores: used by worker processes to notify the
+ * parent that turn-2 / turn-3 processing completed. */
+#define SEM_PARENT_NOTIFY2 5
+#define SEM_PARENT_NOTIFY3 6
 
 /* Prototypes for functions referenced from other translation units. */
 void sem_operacja(int sem, int val);
@@ -172,6 +183,8 @@ int cena_na_indeks(int cena);
 int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g);
 void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown);
 void sygnalizuj_ture(void);
+void sygnalizuj_ture_na(int turn);
+int sem_timedwait_seconds(int sem_idx, int seconds);
 int parsuj_int_lub_zakoncz(const char *what, const char *s);
 void zainicjuj_losowosc(void);
 void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void);

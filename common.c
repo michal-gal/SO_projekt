@@ -94,15 +94,75 @@ void czekaj_na_ture(int turn,
                     volatile sig_atomic_t *
                         shutdown) // czeka na turę wskazaną przez wartość 'turn'
 {
-    while (*common_ctx->kolej_podsumowania != turn && !*shutdown)
+    int sem_idx;
+    if (turn == 1)
+        sem_idx = SEM_TURA_TURN1;
+    else if (turn == 2)
+        sem_idx = SEM_TURA_TURN2;
+    else
+        sem_idx = SEM_TURA_TURN3;
+
+    if (!*shutdown)
     {
-        sem_operacja(SEM_TURA, -1);
+        sem_operacja(sem_idx, -1);
     }
+}
+
+// Try to decrement semaphore without blocking. Returns 0 on success,
+// -1 if would block, exits on unrecoverable error.
+int sem_trywait(int sem_idx)
+{
+    struct sembuf sb = {sem_idx, -1, IPC_NOWAIT};
+    if (semop(common_ctx->sem_id, &sb, 1) == 0)
+        return 0;
+    if (errno == EAGAIN || errno == EINTR)
+        return -1;
+    if (errno == EIDRM || errno == EINVAL)
+        exit(0);
+    exit(1);
+}
+
+// Wait up to `seconds` for semaphore to be available. Returns 0 on success,
+// -1 on timeout.
+int sem_timedwait_seconds(int sem_idx, int seconds)
+{
+    struct timespec start, now;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;)
+    {
+        if (sem_trywait(sem_idx) == 0)
+            return 0;
+        (void)sleep_ms(POLL_MS_MED);
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if ((now.tv_sec - start.tv_sec) >= seconds)
+            break;
+    }
+    return -1;
 }
 
 void sygnalizuj_ture(void) // sygnalizuje zmianę tury podsumowania
 {
-    sem_operacja(SEM_TURA, 1);
+    /* Legacy wrapper: signal the generic open token (fallback) */
+    sygnalizuj_ture_na(0);
+}
+
+void sygnalizuj_ture_na(int turn)
+{
+    switch (turn)
+    {
+    case 1:
+        sem_operacja(SEM_TURA_TURN1, 1);
+        break;
+    case 2:
+        sem_operacja(SEM_TURA_TURN2, 1);
+        break;
+    case 3:
+        sem_operacja(SEM_TURA_TURN3, 1);
+        break;
+    default:
+        sem_operacja(SEM_TURA, 1);
+        break;
+    }
 }
 
 // ====== STOLIKI ======
@@ -232,8 +292,7 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA);  // kuchnia - liczba wydanych dań
     common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6;    // kasa - liczba sprzedanych dań
     common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6;     // flaga czy restauracja jest otwarta
-    common_ctx->kolej_podsumowania = common_ctx->restauracja_otwarta + 1;       // kolejka podsumowania
-    common_ctx->klienci_w_kolejce = common_ctx->kolej_podsumowania + 1;         // statystyka: klienci w kolejce
+    common_ctx->klienci_w_kolejce = common_ctx->restauracja_otwarta + 1;        // statystyka: klienci w kolejce
     common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;           // statystyka: klienci przyjęci
     common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1;            // statystyka: klienci którzy opuścili
 
@@ -304,10 +363,17 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
     (void)pthread_mutexattr_destroy(&mattr);
     (void)pthread_condattr_destroy(&cattr);
 
-    common_ctx->sem_id = semget(IPC_PRIVATE, 2,
-                                IPC_CREAT | 0600);        // utwórz semafory (tura + kierownik)
-    semctl(common_ctx->sem_id, SEM_TURA, SETVAL, 0);      // semafor sygnalizujący zmianę tury
-    semctl(common_ctx->sem_id, SEM_KIEROWNIK, SETVAL, 0); // semafor wybudzający kierownika
+    /* Allocate semaphores: existing usage expects at least the open token
+     * and the kierownik semaphore; add dedicated semaphores for turns 1..3. */
+    common_ctx->sem_id = semget(IPC_PRIVATE, 7,
+                                IPC_CREAT | 0600);             // utwórz semafory
+    semctl(common_ctx->sem_id, SEM_TURA, SETVAL, 0);           // semafor otwarcia
+    semctl(common_ctx->sem_id, SEM_KIEROWNIK, SETVAL, 0);      // semafor wybudzający kierownika
+    semctl(common_ctx->sem_id, SEM_TURA_TURN1, SETVAL, 0);     // semafor tury 1
+    semctl(common_ctx->sem_id, SEM_TURA_TURN2, SETVAL, 0);     // semafor tury 2
+    semctl(common_ctx->sem_id, SEM_TURA_TURN3, SETVAL, 0);     // semafor tury 3
+    semctl(common_ctx->sem_id, SEM_PARENT_NOTIFY2, SETVAL, 0); // parent notify for turn2
+    semctl(common_ctx->sem_id, SEM_PARENT_NOTIFY3, SETVAL, 0); // parent notify for turn3
 
     common_ctx->msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (common_ctx->msgq_id < 0)
@@ -337,8 +403,7 @@ void dolacz_ipc(
     common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA);
     common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6;
     common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6;
-    common_ctx->kolej_podsumowania = common_ctx->restauracja_otwarta + 1;
-    common_ctx->klienci_w_kolejce = common_ctx->kolej_podsumowania + 1;
+    common_ctx->klienci_w_kolejce = common_ctx->restauracja_otwarta + 1;
     common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;
     common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1;
 

@@ -317,11 +317,8 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
         if (common_ctx->stoliki_sync)
             (void)pthread_cond_broadcast(&common_ctx->stoliki_sync->cond);
     }
-    if (common_ctx->kolej_podsumowania)
-    {
-        *common_ctx->kolej_podsumowania = 1;
-        sygnalizuj_ture();
-    }
+    /* Signal open/turn token so waiting workers don't stay blocked. */
+    sygnalizuj_ture_na(1);
 
     LOGS("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
 
@@ -430,8 +427,7 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
              common_ctx->msgq_id);
 
     *common_ctx->restauracja_otwarta = 1;
-    *common_ctx->kolej_podsumowania = 1;
-    sygnalizuj_ture();
+    sygnalizuj_ture_na(1);
 
     /* Register signal handlers early, before launching child processes, so
      * the parent can respond to interrupts during startup and while
@@ -442,29 +438,22 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     signal(SIGTSTP, restauracja_signal_handler);
     signal(SIGCONT, restauracja_signal_handler);
 
-    {
-        pid_t p = launch_child_and_set_group("./obsluga", "obsluga", 0, 0,
-                                             common_ctx->pid_obsluga_shm, 1);
-        common_ctx->pid_obsluga = p;
-        if (common_ctx->pid_obsluga < 0)
-            return awaryjne_zamkniecie_fork();
-    }
-
-    {
-        pid_t p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
-                                             NULL, 0);
-        common_ctx->pid_kucharz = p;
-        if (common_ctx->pid_kucharz < 0)
-            return awaryjne_zamkniecie_fork();
-    }
-
-    {
-        pid_t p = launch_child_and_set_group("./kierownik", "kierownik", 0,
-                                             0, common_ctx->pid_kierownik_shm, 0);
-        common_ctx->pid_kierownik = p;
-        if (common_ctx->pid_kierownik < 0)
-            return awaryjne_zamkniecie_fork();
-    }
+    pid_t p;
+    p = launch_child_and_set_group("./obsluga", "obsluga", 0, 0,
+                                   common_ctx->pid_obsluga_shm, 1);
+    common_ctx->pid_obsluga = p;
+    if (common_ctx->pid_obsluga < 0)
+        return awaryjne_zamkniecie_fork();
+    p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
+                                   NULL, 0);
+    common_ctx->pid_kucharz = p;
+    if (common_ctx->pid_kucharz < 0)
+        return awaryjne_zamkniecie_fork();
+    p = launch_child_and_set_group("./kierownik", "kierownik", 0,
+                                   0, common_ctx->pid_kierownik_shm, 0);
+    common_ctx->pid_kierownik = p;
+    if (common_ctx->pid_kierownik < 0)
+        return awaryjne_zamkniecie_fork();
 
     if (out_czas_pracy)
         *out_czas_pracy = czas_pracy_domyslny;
@@ -640,18 +629,12 @@ int run_restauracja(int czas_pracy)
     else
         LOGS("\n===Czas pracy restauracji minął!===\n");
 
-    *common_ctx->kolej_podsumowania = 1;
-    LOGD("restauracja: pid=%d set kolej_podsumowania=1, signaling SEM_TURA\n",
+    LOGD("restauracja: pid=%d set turn=1, signaling SEM_TURA\n",
          (int)getpid());
-    sygnalizuj_ture();
+    sygnalizuj_ture_na(1);
 
-    struct timespec podsumowanie_start;
-    clock_gettime(CLOCK_MONOTONIC, &podsumowanie_start);
-    while (*common_ctx->kolej_podsumowania != 3 &&
-           elapsed_seconds_since(&podsumowanie_start) < SUMMARY_WAIT_SECONDS)
-    {
-        (void)sleep_ms(POLL_MS_MED);
-    }
+    /* Wait for kucharz to notify parent that turn-3 processing completed. */
+    (void)sem_timedwait_seconds(SEM_PARENT_NOTIFY3, SUMMARY_WAIT_SECONDS);
     (void)sleep_ms(POLL_MS_LONG);
 
     /* Call centralized shutdown/cleanup helper. */

@@ -50,9 +50,8 @@ void kucharz(void)
     ustaw_shutdown_flag(&kuch_ctx->shutdown_requested);
 
     // Czekaj na otwarcie restauracji sygnalizowane przez SEM_TURA zamiast
-    // aktywnego czekania. Rodzic ustawia *kolej_podsumowania i wywołuje
-    // sygnalizuj_ture() gdy restauracja się otwiera, więc zużyj ten token
-    // semafora tutaj.
+    // aktywnego czekania. Rodzic wywołuje `sygnalizuj_ture_na(1)` gdy
+    // restauracja się otwiera, więc zużyj token semafora tutaj.
     LOGD("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
     sem_operacja(SEM_TURA, -1);
     LOGD("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
@@ -65,8 +64,8 @@ void kucharz(void)
     LOGS("Kucharz kończy pracę.\n");
     LOGS("======================\n");
 
-    *common_ctx->kolej_podsumowania = 3;
-    sygnalizuj_ture();
+    sygnalizuj_ture_na(3);
+    sem_operacja(SEM_PARENT_NOTIFY3, 1);
 
     fsync(STDOUT_FILENO); // Wymuś zapis logów
     exit(0);

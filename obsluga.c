@@ -210,8 +210,8 @@ static void *watek_podsumowanie(void *arg)
     already_printed = 1;
     wypisz_podsumowanie();
 
-    *common_ctx->kolej_podsumowania = 2;
-    sygnalizuj_ture();
+    sygnalizuj_ture_na(2);
+    sem_operacja(SEM_PARENT_NOTIFY2, 1);
 
     fsync(STDOUT_FILENO); // Wymuś zapis wszystkich logów podsumowania
     return NULL;
