@@ -26,6 +26,14 @@ Argumenty programu
 - `<czas_sekund>` — czas pracy restauracji w sekundach (drugi argument).
 - `<log_level>` — poziom logowania (0..2) (trzeci argument).
 
+Domyślny czas pracy
+-------------------
+- Kompilacyjny default: `CZAS_PRACY` (z `common.h`) jest domyślną wartością
+	czasu pracy używaną, gdy nie podasz runtime override.
+- Kolejność nadpisywania (precedence): 1) drugi argument programu
+	(`<czas_sekund>`), 2) zmienna środowiskowa `RESTAURACJA_CZAS_PRACY`,
+	3) `CZAS_PRACY` / `czas_pracy_domyslny`.
+
 Makefile / budowanie
 --------------------
 - Zamiast przekazywać liczbę klientów w czasie kompilacji, ustawiasz ją bezpośrednio przy uruchomieniu programu (pierwszy argument).

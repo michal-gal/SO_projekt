@@ -322,7 +322,7 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 {
     int default_klienci = 10;
     int default_czas = CZAS_PRACY;
-    int default_log = 1;
+    int default_log = LOG_LEVEL_DEFAULT;
 
     /* Read default client count from environment. If not set or invalid,
      * fall back to 10. This removes compile-time macro dependency. */
@@ -428,6 +428,9 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
         if (errno == 0 && end && *end == '\0' && v > 0)
             czas_pracy = (int)v;
     }
+    /* Ensure the global default reflects the final chosen runtime so there
+     * is a single authoritative source for "czas pracy" across modules. */
+    czas_pracy_domyslny = czas_pracy;
 
     stworz_ipc();
     generator_stolikow(common_ctx->stoliki);
@@ -601,7 +604,7 @@ int run_restauracja(int czas_pracy)
     {
         struct timespec sim_start;
         clock_gettime(CLOCK_MONOTONIC, &sim_start);
-        while (elapsed_seconds_since(&sim_start) < SIMULATION_SECONDS_DEFAULT &&
+        while (elapsed_seconds_since(&sim_start) < czas_pracy &&
                !ctx->sigint_requested)
         {
             if (kierownik_interval > 0 &&

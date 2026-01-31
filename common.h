@@ -30,45 +30,28 @@ static inline int sleep_ms(unsigned ms)
 
 /* Centralne ustawienia czasowe używane w symulacji. Można je zmieniać globalnie
  * tutaj. */
-#ifndef SIMULATION_SECONDS_DEFAULT
-#define SIMULATION_SECONDS_DEFAULT 20 /* domyślny czas symulacji (sekundy) */
-#endif
+/* Use `CZAS_PRACY` / `czas_pracy_domyslny` as the single authoritative
+ * default runtime; `SIMULATION_SECONDS_DEFAULT` removed to avoid multiple
+ * competing defaults. */
 
-#ifndef SUMMARY_WAIT_SECONDS
 #define SUMMARY_WAIT_SECONDS \
   2 /* ile sekund czekamy na podsumowania na koniec */
-#endif
 
-#ifndef SHUTDOWN_TERM_TIMEOUT
 #define SHUTDOWN_TERM_TIMEOUT 4 /* seconds to wait after SIGTERM */
-#endif
 
-#ifndef SHUTDOWN_KILL_TIMEOUT
 #define SHUTDOWN_KILL_TIMEOUT 2 /* seconds to wait after SIGKILL */
-#endif
 
 /* Central defaults for various timeouts (seconds). Adjust here to affect whole
  * program. */
-#ifndef KIEROWNIK_INTERVAL_DEFAULT
-#define KIEROWNIK_INTERVAL_DEFAULT 30 /* seconds between manager wakes */
-#endif
+#define KIEROWNIK_INTERVAL_DEFAULT 1 /* seconds between manager wakes */
 
-#ifndef MAX_AKTYWNYCH_KLIENTOW_DEFAULT
-#define MAX_AKTYWNYCH_KLIENTOW_DEFAULT 5000 /* default cap of active clients \
-                                             */
-#endif
+#define MAX_AKTYWNYCH_KLIENTOW_DEFAULT 5000 /* default cap of active clients */
 
-#ifndef POLL_MS_SHORT
 #define POLL_MS_SHORT 50 /* short polling interval in ms */
-#endif
 
-#ifndef POLL_MS_MED
 #define POLL_MS_MED 100 /* medium polling interval in ms */
-#endif
 
-#ifndef POLL_MS_LONG
 #define POLL_MS_LONG 200 /* long polling interval in ms */
-#endif
 
 #define X1 10  // liczba stolików o pojemności 1
 #define X2 10  // liczba stolików o pojemności 2
@@ -90,16 +73,15 @@ static inline int sleep_ms(unsigned ms)
 #ifndef CZAS_PRACY
 #define CZAS_PRACY (TK - TP) // czas otwarcia restauracji w sekundach
 #endif
-
 extern int czas_pracy_domyslny;
+#define LOG_LEVEL_DEFAULT 1
+extern int current_log_level;
 #define REZERWA_TASMA 50
 #define REZERWA_STOLIKI 5
 #define REZERWA_KOLEJKA 5
-#ifndef MAX_LOSOWYCH_GRUP
-#define MAX_LOSOWYCH_GRUP \
-  5000 // maksymalna liczba losowych grup do wygenerowania
-#endif
-
+/* `max_losowych_grup` is controlled at runtime (RESTAURACJA_LICZBA_KLIENTOW
+ * or program argument). The compile-time macro MAX_LOSOWYCH_GRUP was a
+ * historical fallback and is removed to avoid dual sources of truth. */
 extern int max_losowych_grup;
 
 // ====== COMMON CONTEXT ======
