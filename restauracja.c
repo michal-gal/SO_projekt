@@ -29,19 +29,26 @@ static inline long elapsed_seconds_since(const struct timespec *start)
 
 // ====== ZMIENNE GLOBALNE ======
 
-static char arg_shm[32];
-static char arg_sem[32];
-static char arg_msgq[32];
+/* Per-run context to reduce scattered globals. */
+struct RestauracjaCtx
+{
+    char arg_shm[32];
+    char arg_sem[32];
+    char arg_msgq[32];
+    pid_t children_pgid;
+    volatile sig_atomic_t sigint_requested;
+    volatile sig_atomic_t shutdown_signal;
+};
+
+static struct RestauracjaCtx ctx_storage = {.children_pgid = -1,
+                                            .sigint_requested = 0,
+                                            .shutdown_signal = 0};
+static struct RestauracjaCtx *ctx = &ctx_storage;
 
 // Wszystkie procesy potomne (obsluga/kucharz/kierownik/klienci) wrzucamy do
 // jednej grupy, żeby móc zakończyć je jednym sygnałem: kill(-pgid,
 // SIGTERM/SIGKILL).
-static pid_t children_pgid = -1;
-
-static volatile sig_atomic_t sigint_requested =
-    0; // czy został otrzymany SIGINT/SIGQUIT
-static volatile sig_atomic_t shutdown_signal =
-    0; // który sygnał spowodował zamknięcie
+/* moved into `ctx` */
 
 // ====== HANDLERY SYGNAŁÓW ======
 
@@ -57,8 +64,7 @@ static void zamknij_odziedziczone_fd_przed_exec(void)
         (void)close(fd);
 }
 
-static const char *
-nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstawie jego numeru
+static const char *nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstawie jego numeru
 {
     switch (signo)
     {
@@ -74,28 +80,26 @@ nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstawie jego numeru
 static void restauracja_on_sigint(int signo) // handler dla SIGINT/SIGQUIT
 {
     (void)signo;
-    sigint_requested = 1;
-    shutdown_signal = signo;
-    if (children_pgid > 0)
-        (void)kill(-children_pgid, SIGTERM);
+    ctx->sigint_requested = 1;
+    ctx->shutdown_signal = signo;
+    if (ctx->children_pgid > 0)
+        (void)kill(-ctx->children_pgid, SIGTERM);
 }
 
 static void restauracja_on_sigtstp(int signo) // handler dla SIGTSTP
 {
     (void)signo;
-    if (children_pgid > 0)
-        (void)kill(-children_pgid, SIGTSTP);
+    if (ctx->children_pgid > 0)
+        (void)kill(-ctx->children_pgid, SIGTSTP);
 
-    // Zatrzymaj też proces rodzica. Używamy SIGSTOP (niełapany), żeby nie wołać
-    // nie-async-signal-safe funkcji (np. signal()) w handlerze.
     (void)kill(getpid(), SIGSTOP);
 }
 
 static void restauracja_on_sigcont(int signo) // handler dla SIGCONT
 {
     (void)signo;
-    if (children_pgid > 0)
-        (void)kill(-children_pgid, SIGCONT);
+    if (ctx->children_pgid > 0)
+        (void)kill(-ctx->children_pgid, SIGCONT);
 }
 
 // ====== ZARZĄDZANIE PROCESAMI ======
@@ -125,7 +129,8 @@ static int zbierz_zombie_nieblokujaco_licznik(
             break;
         LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n",
              (int)getpid(), (int)p);
-        if (p != pid_obsluga && p != pid_kucharz && p != pid_kierownik)
+        if (p != common_ctx->pid_obsluga && p != common_ctx->pid_kucharz &&
+            p != common_ctx->pid_kierownik)
             reaped++;
     }
     return reaped;
@@ -143,12 +148,15 @@ static pid_t uruchom_potomka_exec(
         {
             char arg_grupa[32];
             snprintf(arg_grupa, sizeof(arg_grupa), "%d", numer_grupy);
-            execl(file, argv0, arg_shm, arg_sem, arg_msgq, arg_grupa, (char *)NULL);
+            execl(file, argv0, ctx->arg_shm, ctx->arg_sem, ctx->arg_msgq, arg_grupa,
+                  (char *)NULL);
         }
         else
         {
-            execl(file, argv0, arg_shm, arg_sem, arg_msgq, (char *)NULL);
+            execl(file, argv0, ctx->arg_shm, ctx->arg_sem, ctx->arg_msgq,
+                  (char *)NULL);
         }
+        /* fallthrough handled above; no extra execl here */
         LOGE_ERRNO("execl");
         _exit(127);
     }
@@ -177,14 +185,14 @@ static pid_t launch_child_and_set_group(const char *file, const char *argv0,
     if (out_shm_pid)
         *out_shm_pid = pid;
 
-    if (make_group_if_missing && children_pgid <= 0)
+    if (make_group_if_missing && ctx->children_pgid <= 0)
     {
-        children_pgid = pid;
-        (void)setpgid(pid, children_pgid);
+        ctx->children_pgid = pid;
+        (void)setpgid(pid, ctx->children_pgid);
     }
-    else if (children_pgid > 0)
+    else if (ctx->children_pgid > 0)
     {
-        (void)setpgid(pid, children_pgid);
+        (void)setpgid(pid, ctx->children_pgid);
     }
     return pid;
 }
@@ -207,17 +215,17 @@ static void zakoncz_wszystkie_dzieci(
     const int timeout_kill = SHUTDOWN_KILL_TIMEOUT;
 
     LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n",
-         (int)getpid(), (int)children_pgid);
-    if (children_pgid > 0)
+         (int)getpid(), (int)ctx->children_pgid);
+    if (ctx->children_pgid > 0)
     {
         LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n",
-             (int)getpid(), (int)children_pgid);
-        kill(-children_pgid, SIGTERM);
+             (int)getpid(), (int)ctx->children_pgid);
+        kill(-ctx->children_pgid, SIGTERM);
     }
 
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    while (!czy_grupa_procesow_pusta(children_pgid) &&
+    while (!czy_grupa_procesow_pusta(ctx->children_pgid) &&
            elapsed_seconds_since(&start) < timeout_term)
     {
         LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n",
@@ -226,17 +234,17 @@ static void zakoncz_wszystkie_dzieci(
         sched_yield();
     }
 
-    if (!czy_grupa_procesow_pusta(children_pgid))
+    if (!czy_grupa_procesow_pusta(ctx->children_pgid))
     {
-        if (children_pgid > 0)
+        if (ctx->children_pgid > 0)
         {
             LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n",
-                 (int)getpid(), (int)children_pgid);
-            kill(-children_pgid, SIGKILL);
+                 (int)getpid(), (int)ctx->children_pgid);
+            kill(-ctx->children_pgid, SIGKILL);
         }
 
         clock_gettime(CLOCK_MONOTONIC, &start);
-        while (!czy_grupa_procesow_pusta(children_pgid) &&
+        while (!czy_grupa_procesow_pusta(ctx->children_pgid) &&
                elapsed_seconds_since(&start) < timeout_kill)
         {
             LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, "
@@ -263,16 +271,16 @@ generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grupę klientów
     pid_t pid = uruchom_potomka_exec("./klient", "klient", numer_grupy, 1);
     if (pid < 0)
     {
-        if (restauracja_otwarta)
+        if (common_ctx->restauracja_otwarta)
         {
-            *restauracja_otwarta = 0;
-            if (stoliki_sync)
-                (void)pthread_cond_broadcast(&stoliki_sync->cond);
+            *common_ctx->restauracja_otwarta = 0;
+            if (common_ctx->stoliki_sync)
+                (void)pthread_cond_broadcast(&common_ctx->stoliki_sync->cond);
         }
         return -1;
     }
-    if (children_pgid > 0)
-        (void)setpgid(pid, children_pgid);
+    if (ctx->children_pgid > 0)
+        (void)setpgid(pid, ctx->children_pgid);
     return pid;
 }
 
@@ -281,15 +289,15 @@ generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grupę klientów
 static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 {
     // Błąd fork() nie powinien zostawiać osieroconych procesów/IPC.
-    if (restauracja_otwarta)
+    if (common_ctx->restauracja_otwarta)
     {
-        *restauracja_otwarta = 0;
-        if (stoliki_sync)
-            (void)pthread_cond_broadcast(&stoliki_sync->cond);
+        *common_ctx->restauracja_otwarta = 0;
+        if (common_ctx->stoliki_sync)
+            (void)pthread_cond_broadcast(&common_ctx->stoliki_sync->cond);
     }
-    if (kolej_podsumowania)
+    if (common_ctx->kolej_podsumowania)
     {
-        *kolej_podsumowania = 1;
+        *common_ctx->kolej_podsumowania = 1;
         sygnalizuj_ture();
     }
 
@@ -302,12 +310,12 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
         zakoncz_wszystkie_dzieci(&status);
     }
 
-    if (shm_id >= 0)
-        shmctl(shm_id, IPC_RMID, NULL); // usuń pamięć współdzieloną
-    if (sem_id >= 0)
-        semctl(sem_id, 0, IPC_RMID); // usuń semafory
-    if (msgq_id >= 0)
-        msgctl(msgq_id, IPC_RMID, NULL); // usuń kolejkę komunikatów
+    if (common_ctx->shm_id >= 0)
+        shmctl(common_ctx->shm_id, IPC_RMID, NULL); // usuń pamięć współdzieloną
+    if (common_ctx->sem_id >= 0)
+        semctl(common_ctx->sem_id, 0, IPC_RMID); // usuń semafory
+    if (common_ctx->msgq_id >= 0)
+        msgctl(common_ctx->msgq_id, IPC_RMID, NULL); // usuń kolejkę komunikatów
 
     fprintf(stderr,
             "Awaryjne zamknięcie: nie udało się utworzyć procesu (fork).\n");
@@ -400,21 +408,26 @@ static int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     }
 
     stworz_ipc();
-    generator_stolikow(stoliki);
+    generator_stolikow(common_ctx->stoliki);
     fflush(stdout);
+    snprintf(ctx->arg_shm, sizeof(ctx->arg_shm), "%d",
+             common_ctx->shm_id);
+    snprintf(ctx->arg_sem, sizeof(ctx->arg_sem), "%d",
+             common_ctx->sem_id);
+    snprintf(ctx->arg_msgq, sizeof(ctx->arg_msgq), "%d",
+             common_ctx->msgq_id);
 
-    snprintf(arg_shm, sizeof(arg_shm), "%d", shm_id);
-    snprintf(arg_sem, sizeof(arg_sem), "%d", sem_id);
-    snprintf(arg_msgq, sizeof(arg_msgq), "%d", msgq_id);
-
-    *restauracja_otwarta = 1;
-    *kolej_podsumowania = 1;
+    *common_ctx->restauracja_otwarta = 1;
+    *common_ctx->kolej_podsumowania = 1;
     sygnalizuj_ture();
 
-    pid_obsluga = launch_child_and_set_group("./obsluga", "obsluga", 0, 0,
-                                             pid_obsluga_shm, 1);
-    if (pid_obsluga < 0)
-        return awaryjne_zamkniecie_fork();
+    {
+        pid_t p = launch_child_and_set_group("./obsluga", "obsluga", 0, 0,
+                                             common_ctx->pid_obsluga_shm, 1);
+        common_ctx->pid_obsluga = p;
+        if (common_ctx->pid_obsluga < 0)
+            return awaryjne_zamkniecie_fork();
+    }
 
     signal(SIGINT, restauracja_on_sigint);
     signal(SIGQUIT, restauracja_on_sigint);
@@ -422,15 +435,21 @@ static int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     signal(SIGTSTP, restauracja_on_sigtstp);
     signal(SIGCONT, restauracja_on_sigcont);
 
-    pid_kucharz = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
+    {
+        pid_t p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
                                              NULL, 0);
-    if (pid_kucharz < 0)
-        return awaryjne_zamkniecie_fork();
+        common_ctx->pid_kucharz = p;
+        if (common_ctx->pid_kucharz < 0)
+            return awaryjne_zamkniecie_fork();
+    }
 
-    pid_kierownik = launch_child_and_set_group("./kierownik", "kierownik", 0,
-                                               0, pid_kierownik_shm, 0);
-    if (pid_kierownik < 0)
-        return awaryjne_zamkniecie_fork();
+    {
+        pid_t p = launch_child_and_set_group("./kierownik", "kierownik", 0,
+                                             0, common_ctx->pid_kierownik_shm, 0);
+        common_ctx->pid_kierownik = p;
+        if (common_ctx->pid_kierownik < 0)
+            return awaryjne_zamkniecie_fork();
+    }
 
     if (out_czas_pracy)
         *out_czas_pracy = czas_pracy;
@@ -458,19 +477,20 @@ static int shutdown_restauracja(int *status)
          (int)getpid());
 
     LOGD("restauracja: pid=%d removing IPC resources shm=%d sem=%d msgq=%d\n",
-         (int)getpid(), shm_id, sem_id, msgq_id);
-    if (shm_id >= 0)
-        shmctl(shm_id, IPC_RMID, NULL);
-    if (sem_id >= 0)
-        semctl(sem_id, 0, IPC_RMID);
-    if (msgq_id >= 0)
-        msgctl(msgq_id, IPC_RMID, NULL);
+         (int)getpid(), common_ctx->shm_id, common_ctx->sem_id,
+         common_ctx->msgq_id);
+    if (common_ctx->shm_id >= 0)
+        shmctl(common_ctx->shm_id, IPC_RMID, NULL);
+    if (common_ctx->sem_id >= 0)
+        semctl(common_ctx->sem_id, 0, IPC_RMID);
+    if (common_ctx->msgq_id >= 0)
+        msgctl(common_ctx->msgq_id, IPC_RMID, NULL);
     LOGD("restauracja: pid=%d IPC resources removed\n", (int)getpid());
 
     LOGS("\n=== STATYSTYKI KLIENTÓW ===\n");
-    LOGS("Klienci przyjęci: %d\n", *klienci_przyjeci);
-    LOGS("Klienci którzy opuścili restaurację: %d\n", *klienci_opuscili);
-    LOGS("Klienci w kolejce: %d\n", *klienci_w_kolejce);
+    LOGS("Klienci przyjęci: %d\n", *common_ctx->klienci_przyjeci);
+    LOGS("Klienci którzy opuścili restaurację: %d\n", *common_ctx->klienci_opuscili);
+    LOGS("Klienci w kolejce: %d\n", *common_ctx->klienci_w_kolejce);
     LOGS("===========================\n");
 
     LOGS("Program zakończony.\n");
@@ -498,7 +518,7 @@ static int run_restauracja(int czas_pracy)
 
     const char *disable_env = getenv("RESTAURACJA_DISABLE_MANAGER_CLOSE");
     if (disable_env && strcmp(disable_env, "1") == 0)
-        disable_close = 1;
+        common_ctx->disable_close = 1;
     int aktywni_klienci = 0;
     int liczba_utworzonych_grup = max_losowych_grup;
 
@@ -515,7 +535,7 @@ static int run_restauracja(int czas_pracy)
     struct timespec last_kierownik_post;
     clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
     int numer_grupy = 1;
-    while (liczba_utworzonych_grup-- && !sigint_requested)
+    while (liczba_utworzonych_grup-- && !ctx->sigint_requested)
     {
         if (kierownik_interval > 0 &&
             elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
@@ -530,7 +550,8 @@ static int run_restauracja(int czas_pracy)
             pid_t p = waitpid(-1, &status, 0);
             if (p > 0)
             {
-                if (p != pid_obsluga && p != pid_kucharz && p != pid_kierownik)
+                if (p != common_ctx->pid_obsluga && p != common_ctx->pid_kucharz &&
+                    p != common_ctx->pid_kierownik)
                     aktywni_klienci--;
             }
             else if (p < 0 && errno == EINTR)
@@ -559,7 +580,7 @@ static int run_restauracja(int czas_pracy)
         struct timespec sim_start;
         clock_gettime(CLOCK_MONOTONIC, &sim_start);
         while (elapsed_seconds_since(&sim_start) < SIMULATION_SECONDS_DEFAULT &&
-               !sigint_requested)
+               !ctx->sigint_requested)
         {
             if (kierownik_interval > 0 &&
                 elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
@@ -573,34 +594,34 @@ static int run_restauracja(int czas_pracy)
     }
 
     int koniec_czasu = (elapsed_seconds_since(&start_czekania) >= czas_pracy);
-    int przerwano_sygnalem = sigint_requested;
+    int przerwano_sygnalem = ctx->sigint_requested;
     int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem &&
-                           !*restauracja_otwarta);
+                           !*common_ctx->restauracja_otwarta);
 
     LOGD("restauracja: pid=%d shutdown flags: koniec_czasu=%d "
          "przerwano_sygnalem=%d zamknieto_flaga=%d shutdown_signal=%d\n",
          (int)getpid(), koniec_czasu, przerwano_sygnalem, zamknieto_flaga,
-         (int)shutdown_signal);
+         (int)ctx->shutdown_signal);
 
-    *restauracja_otwarta = 0;
-    if (stoliki_sync)
-        (void)pthread_cond_broadcast(&stoliki_sync->cond);
+    *common_ctx->restauracja_otwarta = 0;
+    if (common_ctx->stoliki_sync)
+        (void)pthread_cond_broadcast(&common_ctx->stoliki_sync->cond);
     if (przerwano_sygnalem)
         LOGS("\n===Przerwano pracę restauracji (%s)!===\n",
-             nazwa_sygnalu((int)shutdown_signal));
+             nazwa_sygnalu((int)ctx->shutdown_signal));
     else if (zamknieto_flaga)
         LOGS("\n===Restauracja została zamknięta normalnie!===\n");
     else
         LOGS("\n===Czas pracy restauracji minął!===\n");
 
-    *kolej_podsumowania = 1;
+    *common_ctx->kolej_podsumowania = 1;
     LOGD("restauracja: pid=%d set kolej_podsumowania=1, signaling SEM_TURA\n",
          (int)getpid());
     sygnalizuj_ture();
 
     struct timespec podsumowanie_start;
     clock_gettime(CLOCK_MONOTONIC, &podsumowanie_start);
-    while (*kolej_podsumowania != 3 &&
+    while (*common_ctx->kolej_podsumowania != 3 &&
            elapsed_seconds_since(&podsumowanie_start) < SUMMARY_WAIT_SECONDS)
     {
         (void)sleep_ms(POLL_MS_MED);

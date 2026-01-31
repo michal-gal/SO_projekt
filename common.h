@@ -22,7 +22,8 @@
 /**
  * Sleep for given milliseconds. Returns 0 on success, -1 on error.
  */
-static inline int sleep_ms(unsigned ms) {
+static inline int sleep_ms(unsigned ms)
+{
   struct timespec req;
   req.tv_sec = ms / 1000;
   req.tv_nsec = (long)(ms % 1000) * NSEC_PER_MSEC;
@@ -36,7 +37,7 @@ static inline int sleep_ms(unsigned ms) {
 #endif
 
 #ifndef SUMMARY_WAIT_SECONDS
-#define SUMMARY_WAIT_SECONDS                                                   \
+#define SUMMARY_WAIT_SECONDS \
   2 /* ile sekund czekamy na podsumowania na koniec */
 #endif
 
@@ -55,7 +56,7 @@ static inline int sleep_ms(unsigned ms) {
 #endif
 
 #ifndef MAX_AKTYWNYCH_KLIENTOW_DEFAULT
-#define MAX_AKTYWNYCH_KLIENTOW_DEFAULT 5000 /* default cap of active clients   \
+#define MAX_AKTYWNYCH_KLIENTOW_DEFAULT 5000 /* default cap of active clients \
                                              */
 #endif
 
@@ -81,13 +82,13 @@ static inline int sleep_ms(unsigned ms) {
 #define p40 40 // ceny dań 4
 #define p50 50 // ceny dań 5
 #define p60 60 // ceny dań 6
-#define MAX_OSOBY                                                              \
+#define MAX_OSOBY \
   (X1 * 1 + X2 * 2 + X3 * 3 + X4 * 4)   // maksymalna liczba osób przy stolikach
 #define MAX_STOLIKI (X1 + X2 + X3 + X4) // maksymalna liczba stolików
 #define MAX_TASMA 150                   // maksymalna długość taśmy
-#define MAX_GRUP_NA_STOLIKU 4 // maksymalna liczba grup na jednym stoliku
-#define TP 10                 // godzina otwarcia restauracji
-#define TK 20                 // godzina zamknięcia restauracji
+#define MAX_GRUP_NA_STOLIKU 4           // maksymalna liczba grup na jednym stoliku
+#define TP 10                           // godzina otwarcia restauracji
+#define TK 20                           // godzina zamknięcia restauracji
 #ifndef CZAS_PRACY
 #define CZAS_PRACY (TK - TP) // czas otwarcia restauracji w sekundach
 #endif
@@ -97,42 +98,46 @@ extern int czas_pracy_domyslny;
 #define REZERWA_STOLIKI 5
 #define REZERWA_KOLEJKA 5
 #ifndef MAX_LOSOWYCH_GRUP
-#define MAX_LOSOWYCH_GRUP                                                      \
+#define MAX_LOSOWYCH_GRUP \
   5000 // maksymalna liczba losowych grup do wygenerowania
 #endif
 
 extern int max_losowych_grup;
 
-// ====== ZMIENNE GLOBALNE ======
-extern int shm_id, sem_id;        // ID pamięci współdzielonej i semaforów
-extern int msgq_id;               // ID kolejki komunikatów (System V)
-extern struct Stolik *stoliki;    // wskaźnik na tablicę stolików
-extern int *restauracja_otwarta;  // wskaźnik na stan restauracji
-extern int *kuchnia_dania_wydane; // liczba wydanych dań przez kuchnię
-extern int *kasa_dania_sprzedane; // liczba sprzedanych dań przez kasę
-extern struct Talerzyk *tasma;    // tablica reprezentująca taśmę
-struct TasmaSync;
-extern struct TasmaSync
-    *tasma_sync; // synchronizacja taśmy (mutex/cond + licznik)
-extern struct StolikiSync
-    *stoliki_sync; // synchronizacja dostępu do tablicy stolików
-extern struct QueueSync *queue_sync; // synchronizacja kolejki (licznik + cond)
-extern int *kolej_podsumowania;      // czyja kolej na podsumowanie (1=obsługa,
-                                     // 2=kucharz, 3=kierownik)
-extern int *klienci_w_kolejce;       // statystyka: liczba klientów w kolejce
-extern int *klienci_przyjeci;        // statystyka: liczba przyjętych klientów
-extern int *
-    klienci_opuscili; // statystyka: liczba klientów którzy opuścili restaurację
+// ====== COMMON CONTEXT ======
+// Centralized storage for IPC/shared data. Use `common_ctx->...` internally
+// and the macro aliases below for backward compatibility with legacy code.
+struct CommonCtx
+{
+  int shm_id;
+  int sem_id;
+  int msgq_id;
+  struct Stolik *stoliki;
+  int *restauracja_otwarta;
+  int *kuchnia_dania_wydane;
+  int *kasa_dania_sprzedane;
+  struct Talerzyk *tasma;
+  struct TasmaSync *tasma_sync;
+  struct StolikiSync *stoliki_sync;
+  struct QueueSync *queue_sync;
+  int *kolej_podsumowania;
+  int *klienci_w_kolejce;
+  int *klienci_przyjeci;
+  int *klienci_opuscili;
+  pid_t pid_obsluga;
+  pid_t pid_kucharz;
+  pid_t pid_kierownik;
+  pid_t *pid_obsluga_shm;
+  pid_t *pid_kierownik_shm;
+  int disable_close;
+  volatile sig_atomic_t *shutdown_flag_ptr;
+};
+
+extern struct CommonCtx *common_ctx;
+
+/* Legacy macro aliases removed. Access shared data via `common_ctx->...`. */
 extern const int ILOSC_STOLIKOW[4]; // liczba stolików o pojemności 1,2,3,4
 extern const int CENY_DAN[6];       // ceny dań
-extern pid_t pid_obsluga, pid_kucharz, pid_kierownik;
-extern int disable_close; // czy wyłączyć zamykanie restauracji przez kierownika
-// PID-y procesów w pamięci współdzielonej (potrzebne po exec(), np. do
-// wysyłania sygnałów)
-extern pid_t *
-    pid_obsluga_shm; // wskaźnik na PID procesu obsługi w pamięci współdzielonej
-extern pid_t *pid_kierownik_shm; // wskaźnik na PID procesu kierownika w pamięci
-                                 // współdzielonej
 // ====== SEMAFORY (INDEKSY) ======
 
 // Semafor sygnalizujący zmianę tury podsumowania
@@ -161,8 +166,8 @@ struct Grupa // struktura reprezentująca grupę klientów
   int stolik_przydzielony; // indeks stolika w tablicy stolików, -1 jeśli brak
   time_t wejscie;
   int pobrane_dania[6]; // liczba pobranych dań
-  int danie_specjalne; // jeśli zamówiono danie specjalne to jest cena dania, 0
-                       // jeśli nie
+  int danie_specjalne;  // jeśli zamówiono danie specjalne to jest cena dania, 0
+                        // jeśli nie
 };
 
 struct Stolik // struktura reprezentująca stolik
@@ -181,20 +186,23 @@ struct Talerzyk // struktura reprezentująca danie na taśmie
                         // specjalnego
 };
 
-struct TasmaSync {
+struct TasmaSync
+{
   pthread_mutex_t mutex;
   pthread_cond_t not_full;
   pthread_cond_t not_empty;
   int count; // liczba zajętych talerzyków na taśmie
 };
 
-struct StolikiSync {
+struct StolikiSync
+{
   pthread_mutex_t mutex; // chroni dostęp do tablicy `stoliki`
   pthread_cond_t
       cond; // sygnalizuje zmiany w stanie stolików (np. danie_specjalne)
 };
 
-struct QueueSync {
+struct QueueSync
+{
   pthread_mutex_t mutex;
   pthread_cond_t not_full;
   pthread_cond_t not_empty;
@@ -252,7 +260,7 @@ void kierownik(void);
 /**
  * Generator stolików – inicjalizuje tablicę stolików.
  */
-void generator_stolikow(struct Stolik *stoliki);
+void generator_stolikow(struct Stolik *stoliki_ptr);
 
 /**
  * Funkcja dla kierownika do zamknięcia restauracji.
@@ -263,7 +271,7 @@ void kierownik_zamknij_restauracje_i_zakoncz_klientow(void);
  * Dodaje danie na taśmę.
  * Wymaga zablokowanego tasma_sync->mutex.
  */
-void dodaj_danie(struct Talerzyk *tasma, int cena);
+void dodaj_danie(struct Talerzyk *tasma_ptr, int cena);
 
 /**
  * Tworzy zasoby IPC (pamięć współdzielona i semafory).
