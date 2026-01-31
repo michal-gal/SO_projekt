@@ -66,18 +66,7 @@ static void zamknij_odziedziczone_fd_przed_exec(void)
         (void)close(fd);
 }
 
-static const char *nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstawie jego numeru
-{
-    switch (signo)
-    {
-    case SIGINT:
-        return "SIGINT";
-    case SIGQUIT:
-        return "SIGQUIT";
-    default:
-        return "(nieznany)";
-    }
-}
+/* Handler is async-signal-safe: it only sets numeric flags. */
 
 /* Single signal handler that consolidates SIGINT/SIGQUIT/SIGTERM, SIGTSTP
  * and SIGCONT behavior. Keeping this local to the module keeps the
@@ -85,48 +74,38 @@ static const char *nazwa_sygnalu(int signo) // zwraca nazwę sygnału na podstaw
  */
 static void restauracja_signal_handler(int signo)
 {
-    switch (signo)
+    if (signo == SIGINT || signo == SIGQUIT || signo == SIGTERM)
     {
-    case SIGINT:
-    case SIGQUIT:
-    case SIGTERM:
         ctx->sigint_requested = 1;
         ctx->shutdown_signal = signo;
         if (ctx->children_pgid > 0)
             (void)kill(-ctx->children_pgid, SIGTERM);
-        break;
-    case SIGTSTP:
+    }
+    else if (signo == SIGTSTP)
+    {
         if (ctx->children_pgid > 0)
             (void)kill(-ctx->children_pgid, SIGTSTP);
         (void)kill(getpid(), SIGSTOP);
-        break;
-    case SIGCONT:
+    }
+    else if (signo == SIGCONT)
+    {
         if (ctx->children_pgid > 0)
             (void)kill(-ctx->children_pgid, SIGCONT);
-        break;
-    default:
-        break;
+    }
+    else
+    {
+        /* ignore other signals */
     }
 }
 
 // ====== ZARZĄDZANIE PROCESAMI ======
 
-static void
-zbierz_zombie_nieblokujaco(int *status) // zbiera zakończone procesy potomne
-{
-    for (;;)
-    {
-        pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
-        if (p <= 0)
-            break;
-        LOGD(
-            "restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n",
-            (int)getpid(), (int)p, (status ? *status : -1));
-    }
-}
-
-static int zbierz_zombie_nieblokujaco_licznik(
-    int *status) // zbiera zakończone procesy i zwraca liczbę klientów
+/* Unified reaper: non-blocking waitpid loop. If `count_clients` is
+ * non-zero, returns the number of reaped PIDs that are considered
+ * client processes (skips obsluga/kucharz/kierownik). If
+ * `count_clients` is zero the function behaves like the previous
+ * `zbierz_zombie_nieblokujaco` (just reaps and logs). */
+static int zbierz_zombie_nieblokujaco(int *status, int count_clients)
 {
     int reaped = 0;
     for (;;)
@@ -134,11 +113,20 @@ static int zbierz_zombie_nieblokujaco_licznik(
         pid_t p = waitpid(-1, status, WNOHANG); // nieblokująco
         if (p <= 0)
             break;
-        LOGD("restauracja: zbierz_zombie_nieblokujaco_licznik: pid=%d reaped=%d\n",
-             (int)getpid(), (int)p);
-        if (p != common_ctx->pid_obsluga && p != common_ctx->pid_kucharz &&
-            p != common_ctx->pid_kierownik)
-            reaped++;
+        if (count_clients)
+        {
+            LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d\n",
+                 (int)getpid(), (int)p);
+            if (p != common_ctx->pid_obsluga && p != common_ctx->pid_kucharz &&
+                p != common_ctx->pid_kierownik)
+                reaped++;
+        }
+        else
+        {
+            LOGD(
+                "restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d status=%d\n",
+                (int)getpid(), (int)p, (status ? *status : -1));
+        }
     }
     return reaped;
 }
@@ -237,7 +225,7 @@ static void zakoncz_wszystkie_dzieci(
     {
         LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n",
              (int)getpid(), (long)elapsed_seconds_since(&start));
-        zbierz_zombie_nieblokujaco(status);
+        (void)zbierz_zombie_nieblokujaco(status, 0);
         sched_yield();
     }
 
@@ -257,7 +245,7 @@ static void zakoncz_wszystkie_dzieci(
             LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, "
                  "elapsed=%ld\n",
                  (int)getpid(), (long)elapsed_seconds_since(&start));
-            zbierz_zombie_nieblokujaco(status);
+            (void)zbierz_zombie_nieblokujaco(status, 0);
             sched_yield();
         }
     }
@@ -550,7 +538,7 @@ int run_restauracja(int czas_pracy)
             sem_operacja(SEM_KIEROWNIK, 1);
             clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
         }
-        aktywni_klienci -= zbierz_zombie_nieblokujaco_licznik(&status);
+        aktywni_klienci -= zbierz_zombie_nieblokujaco(&status, 1);
 
         while (aktywni_klienci >= max_aktywnych_klientow)
         {
@@ -595,7 +583,7 @@ int run_restauracja(int czas_pracy)
                 sem_operacja(SEM_KIEROWNIK, 1);
                 clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
             }
-            zbierz_zombie_nieblokujaco(&status);
+            (void)zbierz_zombie_nieblokujaco(&status, 0);
             sched_yield();
         }
     }
@@ -614,8 +602,16 @@ int run_restauracja(int czas_pracy)
     if (common_ctx->stoliki_sync)
         (void)pthread_cond_broadcast(&common_ctx->stoliki_sync->cond);
     if (przerwano_sygnalem)
-        LOGS("\n===Przerwano pracę restauracji (%s)!===\n",
-             nazwa_sygnalu((int)ctx->shutdown_signal));
+    {
+        const char *name = "(nieznany)";
+        if (ctx->shutdown_signal == SIGINT)
+            name = "SIGINT";
+        else if (ctx->shutdown_signal == SIGQUIT)
+            name = "SIGQUIT";
+        else if (ctx->shutdown_signal == SIGTERM)
+            name = "SIGTERM";
+        LOGS("\n===Przerwano pracę restauracji (%s)!===\n", name);
+    }
     else if (zamknieto_flaga)
         LOGS("\n===Restauracja została zamknięta normalnie!===\n");
     else
