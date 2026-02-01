@@ -80,40 +80,57 @@ Podsumowanie: wszystkie poniższe testy kończą się wynikiem **OK**.
 
 ## Linki do istotnych fragmentów kodu
 
-Poniżej wskazania miejsc w kodzie, które obrazują wymagane konstrukcje i funkcje systemowe.
-Ze względu na brak przypiętego commita w raporcie, podaję konkretne pliki i funkcje.
+Poniżej linki do miejsc w kodzie, które obrazują wymagane konstrukcje i funkcje systemowe (stan repozytorium: `cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b`).
 
 ### a) Tworzenie i obsługa plików (creat(), open(), close(), read(), write(), unlink())
 
-- `open()` + `close()` + `atexit()` (logger): `log.c` → `inicjuj_log_raz()`, `zamknij_log_przy_wyjsciu()`
-- `write()` (zapis do pliku i na stdout/stderr): `log.c` → `loguj_vprintf()`, `loguj_blokiem()`
+- `open()` + `close()` + `atexit()` (logger):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/log.c#L48-L98
+- `write()` (zapis do pliku i na stdout/stderr):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/log.c#L122-L206
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/log.c#L234-L280
 
 ### b) Tworzenie procesów (fork(), exec(), exit(), wait())
 
-- `fork()` + `execl()` + `_exit()`: `restauracja.c` → `uruchom_potomka_exec()`
-- `waitpid()` (zbieranie zombie): `restauracja.c` → `zbierz_zombie_nieblokujaco()`
-- `waitpid()` (końcowe domykanie): `restauracja.c` → `zakoncz_wszystkie_dzieci()`
-- `exit()` (przykład): `kierownik.c` → `kierownik()`
+- `fork()` + `execl()` + `_exit()`:
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L232-L263
+- `waitpid()` (zbieranie zombie):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L161-L190
+- `waitpid()` (końcowe domykanie):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L302-L355
+- `exit()` (przykład):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/kierownik.c#L92-L98
 
 ### c) Obsługa sygnałów (kill(), raise(), signal(), sigaction())
 
-- `signal()` (podpięcie handlerów job-control): `restauracja.c` → `inicjuj_restauracje()`
-- `kill()` (forward i job-control): `restauracja.c` → `obsluz_sygnal_restauracji()`
-- `kill()` (SIGUSR1/SIGUSR2 do obsługi): `kierownik.c` → `kierownik_wyslij_sygnal_obsludze()`
+- `signal()` (podpięcie handlerów job-control):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L535-L619
+- `kill()` (forward i job-control):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L130-L156
+- `kill()` (SIGUSR1/SIGUSR2 do obsługi):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/kierownik.c#L18-L67
 
 ### d) Synchronizacja procesów/wątków (ftok(), semget(), semctl(), semop())
 
-- `semop()` (operacje na semaforach): `common.c` → `sem_operacja()`
-- `semget()` + `semctl()` (tworzenie/inicjalizacja): `common.c` → `inicjuj_semafory()`
+- `semop()` (operacje na semaforach):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/common.c#L248-L296
+- `semget()` + `semctl()` (tworzenie/inicjalizacja):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/common.c#L61-L74
 
 ### e) Segmenty pamięci dzielonej (ftok(), shmget(), shmat(), shmdt(), shmctl())
 
-- `shmget()` + `shmat()` (tworzenie/dolaczanie): `common.c` → `stworz_ipc()`
-- `shmctl()` (sprzątanie): `restauracja.c` → `zamknij_restauracje()`
+- `shmget()` + `shmat()` (tworzenie/dolaczanie):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/common.c#L298-L336
+- `shmctl()` (sprzątanie):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L648-L676
 
 ### f) Kolejki komunikatów (ftok(), msgget(), msgsnd(), msgrcv(), msgctl())
 
-- `msgget()` (tworzenie): `common.c` → `stworz_ipc()`
-- `msgsnd()` (wysyłka): `klient.c` → `kolejka_dodaj()` / `kolejka_dodaj_local()`
-- `msgrcv()` (odbiór): `szatnia.c` → `kolejka_pobierz_local()`
-- `msgctl()` (sprzątanie): `restauracja.c` → `zamknij_restauracje()`
+- `msgget()` (tworzenie):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/common.c#L298-L336
+- `msgsnd()` (wysyłka):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/klient.c#L201-L267
+- `msgrcv()` (odbiór):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/szatnia.c#L154-L220
+- `msgctl()` (sprzątanie):
+  - https://github.com/michal-gal/SO_projekt/blob/cc62ed770fa37b5ed8bdfe49db2fd063c5e1fc1b/src/restauracja.c#L648-L676
