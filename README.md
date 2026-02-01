@@ -3,7 +3,8 @@
 ## Krótko
 
 - Buduj projekt poleceniem: `make`.
-- Program jest sterowany RUNTIME argumentami — liczba grup/klientów nie jest już ustawiana przy kompilacji.
+- Pliki wykonywalne trafiają do `build/bin/`.
+- Program jest sterowany argumentami uruchomienia — liczba grup/klientów nie jest już ustawiana przy kompilacji.
 
 ## Szybkie przykłady
 
@@ -16,14 +17,14 @@ make
 - Uruchom symulację z 20000 grup, 5 sekundami pracy i log level 1:
 
 ```
-./restauracja 20000 5 1
+./build/bin/restauracja 20000 5 1
 ```
 
 ## Argumenty programu
 
 - `<liczba_klientow>` — ile grup klientów stworzyć (pierwszy argument).
 - `<czas_sekund>` — czas pracy restauracji w sekundach (drugi argument).
-- `<log_level>` — poziom logowania (0..2) (trzeci argument).
+- `<log_level>` — poziom logowania (0..3) (trzeci argument).
 
 ## Domyślny czas pracy
 
@@ -61,7 +62,7 @@ make && ./tests/test_smoke.sh
 
 ## Pliki istotne
 
-- `restauracja` — program nadrzędny (starter). Argumenty jak powyżej.
-- `klient`, `obsluga`, `kucharz`, `kierownik` — procesy potomne uruchamiane przez `restauracja`.
+- `build/bin/restauracja` — program nadrzędny (starter). Argumenty jak powyżej.
+- `build/bin/klient`, `build/bin/obsluga`, `build/bin/kucharz`, `build/bin/kierownik`, `build/bin/szatnia` — procesy potomne uruchamiane przez `restauracja`.
 
 Jeśli chcesz, mogę dodać przykład `docker`/CI albo dodatkowe opcje runtime (np. losowy seed przez env).
