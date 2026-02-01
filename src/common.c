@@ -144,6 +144,22 @@ void ustaw_shutdown_flag(volatile sig_atomic_t *flag)
     common_ctx->shutdown_flag_ptr = flag;
 }
 
+static volatile sig_atomic_t *common_sigterm_flag = NULL;
+
+static void common_sigterm_handler(int signo)
+{
+    (void)signo;
+    if (common_sigterm_flag)
+        *common_sigterm_flag = 1;
+}
+
+void common_install_sigterm_handler(volatile sig_atomic_t *flag)
+{
+    common_sigterm_flag = flag;
+    if (signal(SIGTERM, common_sigterm_handler) == SIG_ERR)
+        LOGE_ERRNO("signal(SIGTERM)");
+}
+
 void czekaj_na_ture(int turn,
                     volatile sig_atomic_t *
                         shutdown) // czeka na turę wskazaną przez wartość 'turn'

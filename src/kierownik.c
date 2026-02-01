@@ -1,10 +1,8 @@
-#include "common.h"
+#include "kierownik.h"
 
 #include <errno.h>
-#include <sched.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <sys/msg.h>
 
 // Per-module context for kierownik
 struct KierownikCtx
@@ -16,17 +14,9 @@ static struct KierownikCtx kier_ctx_storage = {.shutdown_requested = 0};
 static struct KierownikCtx *kier_ctx = &kier_ctx_storage;
 
 // Deklaracje wstępne
-static void kierownik_obsluz_sigterm(int signo);
 static void kierownik_wyslij_sygnal(void);
 static void kierownik_send_obsluga_signal(pid_t pid_obsl, int signo,
                                           const char *label);
-
-// Handler sygnału SIGTERM
-static void kierownik_obsluz_sigterm(int signo)
-{
-    (void)signo;
-    kier_ctx->shutdown_requested = 1;
-}
 
 // Wysyłanie sygnału do `obsluga` lub zamknięcie restauracji
 static void kierownik_wyslij_sygnal(void)
@@ -83,8 +73,7 @@ void kierownik(void)
     zainicjuj_losowosc();
 
     // Ustaw handler sygnału
-    if (signal(SIGTERM, kierownik_obsluz_sigterm) == SIG_ERR)
-        LOGE_ERRNO("signal(SIGTERM)");
+    common_install_sigterm_handler(&kier_ctx->shutdown_requested);
 
     ustaw_shutdown_flag(&kier_ctx->shutdown_requested);
 

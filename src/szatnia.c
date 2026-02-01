@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "common.h"
+#include "szatnia.h"
 
 #include <errno.h>
 #include <sched.h>
@@ -19,12 +19,6 @@ static struct SzatniaCtx *szat_ctx = &szat_ctx_storage;
 
 static void kolejka_dodaj_local(struct Grupa g);
 static struct Grupa kolejka_pobierz_local(void);
-
-static void szatnia_obsluz_sigterm(int signo)
-{
-    (void)signo;
-    szat_ctx->shutdown_requested = 1;
-}
 
 static int usadz_grupe(const struct Grupa *g, int *numer_stolika,
                        int *zajete, int *pojemnosc)
@@ -53,7 +47,7 @@ static int usadz_grupe(const struct Grupa *g, int *numer_stolika,
     return usadzono;
 }
 
-static void szatnia_petla(void)
+void szatnia(void)
 {
     while (*common_ctx->restauracja_otwarta && !szat_ctx->shutdown_requested)
     {
@@ -247,10 +241,9 @@ int main(int argc, char **argv)
     if (dolacz_ipc_z_argv(argc, argv, 0, NULL) != 0)
         return 1;
 
-    if (signal(SIGTERM, szatnia_obsluz_sigterm) == SIG_ERR)
-        LOGE_ERRNO("signal(SIGTERM)");
+    common_install_sigterm_handler(&szat_ctx->shutdown_requested);
     ustaw_shutdown_flag(&szat_ctx->shutdown_requested);
 
-    szatnia_petla();
+    szatnia();
     return 0;
 }

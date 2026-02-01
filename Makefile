@@ -7,7 +7,7 @@ CC = gcc
 # RESTAURACJA_CZAS_PRACY). Leave compiler flags minimal.
 
 # Compiler/linker flags
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -Iinclude
 CFLAGS += # CLIENTS are controlled at runtime via program arguments / env
 # Do not pass CLIENTS_TO_CREATE as a compile-time macro anymore.
 # The program reads default client count from environment variable
@@ -16,18 +16,21 @@ CFLAGS += # LOG_LEVEL and CZAS_PRACY are read from environment at runtime
 CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread
 
+BUILD_DIR = build
+OBJ_DIR = $(BUILD_DIR)/obj
+
 TARGET = restauracja
 PROCS = klient obsluga szatnia kucharz kierownik
-HEADERS = common.h restauracja.h log.h
+HEADERS = include/common.h include/restauracja.h include/log.h include/obsluga.h include/kucharz.h include/kierownik.h include/klient.h include/szatnia.h
 
-COMMON_OBJS = common.o log.o
+COMMON_OBJS = $(OBJ_DIR)/common.o $(OBJ_DIR)/log.o
 
-OBJECTS_RESTAURACJA = restauracja.o $(COMMON_OBJS)
-OBJECTS_KLIENT = klient.o $(COMMON_OBJS)
-OBJECTS_OBSLUGA = obsluga.o $(COMMON_OBJS)
-OBJECTS_SZATNIA = szatnia.o $(COMMON_OBJS)
-OBJECTS_KUCHARZ = kucharz.o $(COMMON_OBJS)
-OBJECTS_KIEROWNIK = kierownik.o $(COMMON_OBJS)
+OBJECTS_RESTAURACJA = $(OBJ_DIR)/restauracja.o $(COMMON_OBJS)
+OBJECTS_KLIENT = $(OBJ_DIR)/klient.o $(COMMON_OBJS)
+OBJECTS_OBSLUGA = $(OBJ_DIR)/obsluga.o $(COMMON_OBJS)
+OBJECTS_SZATNIA = $(OBJ_DIR)/szatnia.o $(COMMON_OBJS)
+OBJECTS_KUCHARZ = $(OBJ_DIR)/kucharz.o $(COMMON_OBJS)
+OBJECTS_KIEROWNIK = $(OBJ_DIR)/kierownik.o $(COMMON_OBJS)
 
 all: $(TARGET) $(PROCS)
 
@@ -50,34 +53,43 @@ kierownik: $(OBJECTS_KIEROWNIK)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_KIEROWNIK)
 
 
-restauracja.o: restauracja.c $(HEADERS)
-	$(CC) $(CFLAGS) -c restauracja.c
+$(OBJ_DIR)/restauracja.o: src/restauracja.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/restauracja.c -o $(OBJ_DIR)/restauracja.o
 
-common.o: common.c $(HEADERS)
-	$(CC) $(CFLAGS) -c common.c
+$(OBJ_DIR)/common.o: src/common.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/common.c -o $(OBJ_DIR)/common.o
 
-log.o: log.c log.h
-	$(CC) $(CFLAGS) -c log.c
+$(OBJ_DIR)/log.o: src/log.c include/log.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/log.c -o $(OBJ_DIR)/log.o
 
 
-klient.o: klient.c $(HEADERS)
-	$(CC) $(CFLAGS) -c klient.c
+$(OBJ_DIR)/klient.o: src/klient.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/klient.c -o $(OBJ_DIR)/klient.o
 
-obsluga.o: obsluga.c $(HEADERS)
-	$(CC) $(CFLAGS) -c obsluga.c
+$(OBJ_DIR)/obsluga.o: src/obsluga.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/obsluga.c -o $(OBJ_DIR)/obsluga.o
 
-szatnia.o: szatnia.c $(HEADERS)
-	$(CC) $(CFLAGS) -c szatnia.c
+$(OBJ_DIR)/szatnia.o: src/szatnia.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/szatnia.c -o $(OBJ_DIR)/szatnia.o
 
-kucharz.o: kucharz.c $(HEADERS)
-	$(CC) $(CFLAGS) -c kucharz.c
+$(OBJ_DIR)/kucharz.o: src/kucharz.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/kucharz.c -o $(OBJ_DIR)/kucharz.o
 
-kierownik.o: kierownik.c $(HEADERS)
-	$(CC) $(CFLAGS) -c kierownik.c
+$(OBJ_DIR)/kierownik.o: src/kierownik.c $(HEADERS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c src/kierownik.c -o $(OBJ_DIR)/kierownik.o
 
 
 clean:
-	rm -f *.o $(TARGET) $(PROCS) generator
+	rm -f $(TARGET) $(PROCS) generator
+	rm -rf $(OBJ_DIR)
 
 test: all
 	./tests/test_smoke.sh

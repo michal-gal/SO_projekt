@@ -1,6 +1,5 @@
-#include "common.h"
+#include "kucharz.h"
 
-#include <sched.h>
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -14,16 +13,8 @@ static struct KucharzCtx kuch_ctx_storage = {.shutdown_requested = 0};
 static struct KucharzCtx *kuch_ctx = &kuch_ctx_storage;
 
 // Deklaracje wstępne
-static void obsluz_sigterm(int signo);
 static void drukuj_podsumowanie_kuchni(void);
 static void czekaj_na_otwarcie_i_podsumowanie(void);
-
-// Handler sygnału SIGTERM
-static void obsluz_sigterm(int signo)
-{
-    (void)signo;
-    kuch_ctx->shutdown_requested = 1;
-}
 
 // Drukuj podsumowanie kuchni
 static void drukuj_podsumowanie_kuchni(void)
@@ -45,8 +36,7 @@ static void drukuj_podsumowanie_kuchni(void)
 void kucharz(void)
 {
     // Ustaw handler sygnału
-    if (signal(SIGTERM, obsluz_sigterm) == SIG_ERR)
-        LOGE_ERRNO("signal(SIGTERM)");
+    common_install_sigterm_handler(&kuch_ctx->shutdown_requested);
 
     ustaw_shutdown_flag(&kuch_ctx->shutdown_requested);
 

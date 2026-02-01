@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -33,9 +34,9 @@ log_default_path(void) // generuje domyślną ścieżkę do pliku logu
     struct tm tm_now;
     localtime_r(&now, &tm_now);
 
-    // restauracja_YYYY-MM-DD_HH-MM-SS.log
+    // logs/restauracja_YYYY-MM-DD_HH-MM-SS.log
     (void)snprintf(path, sizeof(path),
-                   "restauracja_%04d-%02d-%02d_%02d-%02d-%02d.log",
+                   "logs/restauracja_%04d-%02d-%02d_%02d-%02d-%02d.log",
                    tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
                    tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec);
 
@@ -72,6 +73,9 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
         // samego pliku.
         (void)setenv("RESTAURACJA_LOG_FILE", path, 0);
     }
+
+    if (path && strncmp(path, "logs/", 5) == 0)
+        (void)mkdir("logs", 0755);
 
     int flags = O_WRONLY | O_CREAT | O_APPEND;
 #ifdef O_CLOEXEC

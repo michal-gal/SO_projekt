@@ -1,7 +1,7 @@
-#include "common.h"
+#include "obsluga.h"
 #include <sched.h>
-#include <unistd.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // Per-module context for obsluga
 struct ObslugaCtx
@@ -217,9 +217,6 @@ static void obsluz_sygnal(int signo)
     case SIGUSR2:
         obsl_ctx->wydajnosc = 1;
         break;
-    case SIGTERM:
-        obsl_ctx->shutdown_requested = 1;
-        break;
     default:
         break;
     }
@@ -296,8 +293,7 @@ void obsluga(void)
         LOGE_ERRNO("signal(SIGUSR1)");
     if (signal(SIGUSR2, obsluz_sygnal) == SIG_ERR)
         LOGE_ERRNO("signal(SIGUSR2)");
-    if (signal(SIGTERM, obsluz_sygnal) == SIG_ERR)
-        LOGE_ERRNO("signal(SIGTERM)");
+    common_install_sigterm_handler(&obsl_ctx->shutdown_requested);
 
     ustaw_shutdown_flag(&obsl_ctx->shutdown_requested);
 

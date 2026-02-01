@@ -175,10 +175,7 @@ extern const int CENY_DAN[6];
 /* Prototypes for functions referenced from other translation units. */
 void sem_operacja(int sem, int val);
 void ustaw_shutdown_flag(volatile sig_atomic_t *flag);
-void klient(int numer_grupy);
-void obsluga(void);
-void kucharz(void);
-void kierownik(void);
+void common_install_sigterm_handler(volatile sig_atomic_t *flag);
 void kierownik_zamknij_restauracje_i_zakoncz_klientow(void);
 void stworz_ipc(void);
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
