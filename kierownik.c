@@ -18,6 +18,8 @@ static struct KierownikCtx *kier_ctx = &kier_ctx_storage;
 // Deklaracje wstępne
 static void kierownik_obsluz_sigterm(int signo);
 static void kierownik_wyslij_sygnal(void);
+static void kierownik_send_obsluga_signal(pid_t pid_obsl, int signo,
+                                          const char *label);
 
 // Handler sygnału SIGTERM
 static void kierownik_obsluz_sigterm(int signo)
@@ -42,21 +44,11 @@ static void kierownik_wyslij_sygnal(void)
 
     if (random_value == 1) // ~0.0001% chance for SIGUSR1
     {
-        if (pid_obsl > 0)
-        {
-            if (kill(pid_obsl, SIGUSR1) != 0 && errno != ESRCH)
-                LOGE_ERRNO("kill(SIGUSR1) obsluga");
-        }
-        // LOGI("Kierownik wysyła SIGUSR1 do obsługi (PID %d)\n", pid_obsl);
+        kierownik_send_obsluga_signal(pid_obsl, SIGUSR1, "kill(SIGUSR1) obsluga");
     }
     else if (random_value == 2) // ~0.0001% chance for SIGUSR2
     {
-        if (pid_obsl > 0)
-        {
-            if (kill(pid_obsl, SIGUSR2) != 0 && errno != ESRCH)
-                LOGE_ERRNO("kill(SIGUSR2) obsluga");
-        }
-        // LOGI("Kierownik wysyła SIGUSR2 do obsługi (PID %d)\n", pid_obsl);
+        kierownik_send_obsluga_signal(pid_obsl, SIGUSR2, "kill(SIGUSR2) obsluga");
     }
     else if (random_value == 3) // ~0.0001% chance to close restaurant
     {
@@ -71,11 +63,15 @@ static void kierownik_wyslij_sygnal(void)
                  "(RESTAURACJA_DISABLE_MANAGER_CLOSE=1)\n");
         }
     }
-    // // }
-    // else
-    {
-        // No action
-    }
+}
+
+static void kierownik_send_obsluga_signal(pid_t pid_obsl, int signo,
+                                          const char *label)
+{
+    if (pid_obsl <= 0)
+        return;
+    if (kill(pid_obsl, signo) != 0 && errno != ESRCH)
+        LOGE_ERRNO(label);
 }
 
 // Main manager function
@@ -116,16 +112,8 @@ void kierownik(void)
 // Główny punkt wejścia
 int main(int argc, char **argv)
 {
-    if (argc != 4)
-    {
-        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+    if (dolacz_ipc_z_argv(argc, argv, 0, NULL) != 0)
         return 1;
-    }
-
-    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
-    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
-    common_ctx->msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
-    dolacz_ipc(shm, sem);
     kierownik();
     return 0;
 }

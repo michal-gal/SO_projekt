@@ -118,6 +118,12 @@ struct QueueSync
   int max;
 };
 
+typedef struct // komunikat kolejki
+{
+  long mtype;
+  struct Grupa grupa;
+} QueueMsg;
+
 /* Centralized runtime context shared via pointers in shared memory. */
 struct CommonCtx
 {
@@ -168,17 +174,15 @@ extern const int CENY_DAN[6];
 /* Prototypes for functions referenced from other translation units. */
 void sem_operacja(int sem, int val);
 void ustaw_shutdown_flag(volatile sig_atomic_t *flag);
-void kolejka_dodaj(struct Grupa g);
-struct Grupa kolejka_pobierz(void);
 void klient(int numer_grupy);
 void obsluga(void);
 void kucharz(void);
 void kierownik(void);
-void generator_stolikow(struct Stolik *stoliki_ptr);
 void kierownik_zamknij_restauracje_i_zakoncz_klientow(void);
-void dodaj_danie(struct Talerzyk *tasma_ptr, int cena);
 void stworz_ipc(void);
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
+int dolacz_ipc_z_argv(int argc, char **argv, int potrzebuje_grupy,
+                      int *out_numer_grupy);
 int cena_na_indeks(int cena);
 int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g);
 void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown);
@@ -186,6 +190,5 @@ void sygnalizuj_ture_na(int turn);
 int sem_timedwait_seconds(int sem_idx, int seconds);
 int parsuj_int_lub_zakoncz(const char *what, const char *s);
 void zainicjuj_losowosc(void);
-void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void);
 
 #endif /* COMMON_H */

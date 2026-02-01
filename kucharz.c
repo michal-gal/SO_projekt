@@ -16,6 +16,7 @@ static struct KucharzCtx *kuch_ctx = &kuch_ctx_storage;
 // Deklaracje wstępne
 static void obsluz_sigterm(int signo);
 static void drukuj_podsumowanie_kuchni(void);
+static void czekaj_na_otwarcie_i_podsumowanie(void);
 
 // Handler sygnału SIGTERM
 static void obsluz_sigterm(int signo)
@@ -49,15 +50,7 @@ void kucharz(void)
 
     ustaw_shutdown_flag(&kuch_ctx->shutdown_requested);
 
-    // Czekaj na otwarcie restauracji sygnalizowane przez SEM_TURA zamiast
-    // aktywnego czekania. Rodzic wywołuje `sygnalizuj_ture_na(1)` gdy
-    // restauracja się otwiera, więc zużyj token semafora tutaj.
-    LOGD("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
-    sem_operacja(SEM_TURA, -1);
-    LOGD("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
-
-    // Po uruchomieniu, czekaj na turę podsumowania (2) lub zamknięcie.
-    czekaj_na_ture(2, &kuch_ctx->shutdown_requested);
+    czekaj_na_otwarcie_i_podsumowanie();
 
     drukuj_podsumowanie_kuchni();
 
@@ -71,19 +64,24 @@ void kucharz(void)
     exit(0);
 }
 
+static void czekaj_na_otwarcie_i_podsumowanie(void)
+{
+    // Czekaj na otwarcie restauracji sygnalizowane przez SEM_TURA zamiast
+    // aktywnego czekania. Rodzic wywołuje `sygnalizuj_ture_na(1)` gdy
+    // restauracja się otwiera, więc zużyj token semafora tutaj.
+    LOGD("kucharz: pid=%d waiting SEM_TURA (open)\n", (int)getpid());
+    sem_operacja(SEM_TURA, -1);
+    LOGD("kucharz: pid=%d woke SEM_TURA (open)\n", (int)getpid());
+
+    // Po uruchomieniu, czekaj na turę podsumowania (2) lub zamknięcie.
+    czekaj_na_ture(2, &kuch_ctx->shutdown_requested);
+}
+
 // Główny punkt wejścia
 int main(int argc, char **argv)
 {
-    if (argc != 4)
-    {
-        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+    if (dolacz_ipc_z_argv(argc, argv, 0, NULL) != 0)
         return 1;
-    }
-
-    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
-    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
-    common_ctx->msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
-    dolacz_ipc(shm, sem);
     kucharz();
     return 0;
 }

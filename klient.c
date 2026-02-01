@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "common.h"
+#include "queue.h"
 
 #include <sched.h>
 #include <stdlib.h>
@@ -527,17 +528,9 @@ void klient(int numer_grupy)
 // Główny punkt wejścia
 int main(int argc, char **argv)
 {
-    if (argc != 5)
-    {
-        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id> <numer_grupy>\n", argv[0]);
+    int numer_grupy = 0;
+    if (dolacz_ipc_z_argv(argc, argv, 1, &numer_grupy) != 0)
         return 1;
-    }
-
-    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
-    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
-    common_ctx->msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
-    int numer_grupy = parsuj_int_lub_zakoncz("numer_grupy", argv[4]);
-    dolacz_ipc(shm, sem);
     zainicjuj_losowosc();
     klient(numer_grupy);
     return 0;

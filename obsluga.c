@@ -1,4 +1,5 @@
 #include "common.h"
+#include "queue.h"
 
 #include <sched.h>
 #include <unistd.h>
@@ -14,14 +15,28 @@ struct ObslugaCtx
 static struct ObslugaCtx obsl_ctx_storage = {.wydajnosc = 2, .shutdown_requested = 0};
 static struct ObslugaCtx *obsl_ctx = &obsl_ctx_storage;
 
+struct SpecOrder
+{
+    int cena;
+    int numer_stolika;
+    int stolik_idx;
+    int grupa_idx;
+};
+
 // Deklaracje wstępne
 static void obsluga_podaj_dania_normalne(double wydajnosc);
 static void *watek_specjalne(void *arg);
 static void *watek_podsumowanie(void *arg);
 static void obsluz_sygnal(int signo);
 static void wypisz_podsumowanie(void);
+static int zbierz_zamowienia_specjalne(struct SpecOrder *orders, int max);
+static void wyczysc_rezerwacje_specjalne(const struct SpecOrder *orders,
+                                         int count);
+static void dodaj_danie(struct Talerzyk *tasma_local, int cena);
 
 // Wątek obsługi kolejki (usadzanie)
+static int usadz_grupe(const struct Grupa *g, int *numer_stolika,
+                       int *zajete, int *pojemnosc);
 static void *watek_kolejki(void *arg)
 {
     (void)arg;
@@ -30,47 +45,57 @@ static void *watek_kolejki(void *arg)
         struct Grupa g = kolejka_pobierz();
         LOGD("obsluga: pid=%d kolejka_pobierz returned group=%d\n", (int)getpid(),
              g.numer_grupy);
-        if (g.numer_grupy != 0)
+        if (g.numer_grupy == 0)
+            continue;
+
+        int numer_stolika = 0;
+        int zajete = 0;
+        int pojemnosc = 0;
+        if (usadz_grupe(&g, &numer_stolika, &zajete, &pojemnosc))
         {
-            int stolik_idx = -1;
-            int usadzono = 0;
-            int numer_stolika = 0;
-            int zajete = 0;
-            int pojemnosc = 0;
-            int group_num = g.numer_grupy;
-
-            pthread_mutex_lock(&common_ctx->stoliki_sync->mutex);
-            stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(&g);
-            if (stolik_idx >= 0)
-            {
-                common_ctx->stoliki[stolik_idx].grupy[common_ctx->stoliki[stolik_idx].liczba_grup] = g;
-                common_ctx->stoliki[stolik_idx].zajete_miejsca += g.osoby;
-                common_ctx->stoliki[stolik_idx].liczba_grup++;
-                usadzono = 1;
-                numer_stolika = common_ctx->stoliki[stolik_idx].numer_stolika;
-                zajete = common_ctx->stoliki[stolik_idx].zajete_miejsca;
-                pojemnosc = common_ctx->stoliki[stolik_idx].pojemnosc;
-            }
-            pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-
-            if (usadzono)
-            {
-                LOGP("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
-                     group_num, numer_stolika, zajete, pojemnosc);
-                /* Zliczamy osoby (klientów), a nie grupy. */
-                (*common_ctx->klienci_przyjeci) += g.osoby;
-                if (g.proces_id > 0)
-                    (void)kill(g.proces_id, SIGUSR1);
-            }
-
-            if (!usadzono && *common_ctx->restauracja_otwarta)
-                kolejka_dodaj(g);
+            LOGP("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
+                 g.numer_grupy, numer_stolika, zajete, pojemnosc);
+            /* Zliczamy osoby (klientów), a nie grupy. */
+            (*common_ctx->klienci_przyjeci) += g.osoby;
+            if (g.proces_id > 0)
+                (void)kill(g.proces_id, SIGUSR1);
+        }
+        else if (*common_ctx->restauracja_otwarta)
+        {
+            kolejka_dodaj(g);
         }
 
         sched_yield();
     }
 
     return NULL;
+}
+
+static int usadz_grupe(const struct Grupa *g, int *numer_stolika,
+                       int *zajete, int *pojemnosc)
+{
+    int stolik_idx = -1;
+    int usadzono = 0;
+
+    pthread_mutex_lock(&common_ctx->stoliki_sync->mutex);
+    stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(g);
+    if (stolik_idx >= 0)
+    {
+        struct Stolik *st = &common_ctx->stoliki[stolik_idx];
+        st->grupy[st->liczba_grup] = *g;
+        st->zajete_miejsca += g->osoby;
+        st->liczba_grup++;
+        usadzono = 1;
+        if (numer_stolika)
+            *numer_stolika = st->numer_stolika;
+        if (zajete)
+            *zajete = st->zajete_miejsca;
+        if (pojemnosc)
+            *pojemnosc = st->pojemnosc;
+    }
+    pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
+
+    return usadzono;
 }
 
 // Wątek podawania dań normalnych
@@ -101,85 +126,115 @@ static void *watek_podawania(void *arg)
     return NULL;
 }
 
+static void dodaj_danie(struct Talerzyk *tasma_local, int cena)
+{
+    while (common_ctx->tasma_sync->count >= MAX_TASMA)
+    {
+        (void)pthread_cond_wait(&common_ctx->tasma_sync->not_full,
+                                &common_ctx->tasma_sync->mutex);
+    }
+
+    do
+    {
+        struct Talerzyk ostatni = tasma_local[MAX_TASMA - 1];
+
+        for (int i = MAX_TASMA - 1; i > 0; i--)
+        {
+            tasma_local[i] = tasma_local[i - 1];
+        }
+
+        tasma_local[0] = ostatni; // WRACA NA POCZĄTEK
+    } while (tasma_local[0].cena != 0);
+
+    tasma_local[0].cena = cena;
+    tasma_local[0].stolik_specjalny = 0;
+    common_ctx->tasma_sync->count++;
+    pthread_cond_signal(&common_ctx->tasma_sync->not_empty);
+    LOGD("dodaj_danie: wydano danie za %d zł na taśmę (count=%d)\n", cena,
+         common_ctx->tasma_sync->count);
+}
+
 // Wątek obsługi zamówień specjalnych
 static void *watek_specjalne(void *arg)
 {
     (void)arg;
     while (*common_ctx->restauracja_otwarta && !obsl_ctx->shutdown_requested)
     {
-        // Obsługa zamówień specjalnych: najpierw rezerwuj przy stolikach,
-        // potem dodaj na taśmę, następnie usuń rezerwacje
-        int spec_ceny[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
-        int spec_numer_stolika[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
-        int spec_stolik_idx[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
-        int spec_grupa_idx[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
-        int spec_cnt = 0;
+        struct SpecOrder orders[MAX_STOLIKI * MAX_GRUP_NA_STOLIKU];
+        int count = zbierz_zamowienia_specjalne(orders,
+                                                MAX_STOLIKI * MAX_GRUP_NA_STOLIKU);
 
-        /* Wait for a change in stoliki (special order placed) or shutdown. */
-        if (pthread_mutex_lock(&common_ctx->stoliki_sync->mutex) != 0)
+        if (count == 0)
             continue;
 
-        /* Jednorazowe skanowanie: zarezerwuj nowo zgłoszone zamówienia specjalne.
-         */
-        for (int stolik = 0; stolik < MAX_STOLIKI; stolik++)
-        {
-            for (int grupa = 0; grupa < common_ctx->stoliki[stolik].liczba_grup; grupa++)
-            {
-                int cena_specjalna = common_ctx->stoliki[stolik].grupy[grupa].danie_specjalne;
-                if (cena_specjalna > 0 &&
-                    spec_cnt < (MAX_STOLIKI * MAX_GRUP_NA_STOLIKU))
-                {
-                    common_ctx->stoliki[stolik].grupy[grupa].danie_specjalne =
-                        -cena_specjalna; // reserve
-                    spec_ceny[spec_cnt] = cena_specjalna;
-                    spec_numer_stolika[spec_cnt] = common_ctx->stoliki[stolik].numer_stolika;
-                    spec_stolik_idx[spec_cnt] = stolik;
-                    spec_grupa_idx[spec_cnt] = grupa;
-                    spec_cnt++;
-                }
-            }
-        }
-
-        if (spec_cnt == 0 && *common_ctx->restauracja_otwarta && !obsl_ctx->shutdown_requested)
-        {
-            /* Brak zamówień specjalnych – poczekaj na sygnał zmiany. */
-            (void)pthread_cond_wait(&common_ctx->stoliki_sync->cond, &common_ctx->stoliki_sync->mutex);
-            pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-            continue;
-        }
-
-        pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-
-        for (int i = 0; i < spec_cnt; i++)
+        for (int i = 0; i < count; i++)
         {
             pthread_mutex_lock(&common_ctx->tasma_sync->mutex);
-            dodaj_danie(common_ctx->tasma, spec_ceny[i]);
-            common_ctx->tasma[0].stolik_specjalny = spec_numer_stolika[i];
-            int idx = cena_na_indeks(spec_ceny[i]);
+            dodaj_danie(common_ctx->tasma, orders[i].cena);
+            common_ctx->tasma[0].stolik_specjalny = orders[i].numer_stolika;
+            int idx = cena_na_indeks(orders[i].cena);
             if (idx >= 0)
                 common_ctx->kuchnia_dania_wydane[idx]++;
             pthread_mutex_unlock(&common_ctx->tasma_sync->mutex);
 
             LOGP("Obsługa dodała danie specjalne za %d zł dla stolika %d\n",
-                 spec_ceny[i], spec_numer_stolika[i]);
+                 orders[i].cena, orders[i].numer_stolika);
         }
 
-        if (spec_cnt > 0)
-        {
-            pthread_mutex_lock(&common_ctx->stoliki_sync->mutex);
-            for (int i = 0; i < spec_cnt; i++)
-            {
-                int *slot = &common_ctx->stoliki[spec_stolik_idx[i]]
-                                 .grupy[spec_grupa_idx[i]]
-                                 .danie_specjalne;
-                if (*slot == -spec_ceny[i])
-                    *slot = 0;
-            }
-            pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-        }
+        wyczysc_rezerwacje_specjalne(orders, count);
     }
 
     return NULL;
+}
+
+static int zbierz_zamowienia_specjalne(struct SpecOrder *orders, int max)
+{
+    int count = 0;
+    if (pthread_mutex_lock(&common_ctx->stoliki_sync->mutex) != 0)
+        return 0;
+
+    for (int stolik = 0; stolik < MAX_STOLIKI; stolik++)
+    {
+        for (int grupa = 0; grupa < common_ctx->stoliki[stolik].liczba_grup; grupa++)
+        {
+            int cena_specjalna = common_ctx->stoliki[stolik].grupy[grupa].danie_specjalne;
+            if (cena_specjalna > 0 && count < max)
+            {
+                common_ctx->stoliki[stolik].grupy[grupa].danie_specjalne =
+                    -cena_specjalna; // reserve
+                orders[count].cena = cena_specjalna;
+                orders[count].numer_stolika = common_ctx->stoliki[stolik].numer_stolika;
+                orders[count].stolik_idx = stolik;
+                orders[count].grupa_idx = grupa;
+                count++;
+            }
+        }
+    }
+
+    if (count == 0 && *common_ctx->restauracja_otwarta && !obsl_ctx->shutdown_requested)
+        (void)pthread_cond_wait(&common_ctx->stoliki_sync->cond,
+                                &common_ctx->stoliki_sync->mutex);
+
+    pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
+    return count;
+}
+
+static void wyczysc_rezerwacje_specjalne(const struct SpecOrder *orders,
+                                         int count)
+{
+    if (count <= 0)
+        return;
+
+    pthread_mutex_lock(&common_ctx->stoliki_sync->mutex);
+    for (int i = 0; i < count; i++)
+    {
+        int *slot = &common_ctx->stoliki[orders[i].stolik_idx]
+                         .grupy[orders[i].grupa_idx]
+                         .danie_specjalne;
+        if (*slot == -orders[i].cena)
+            *slot = 0;
+    }
+    pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
 }
 
 // Wątek drukujący podsumowanie na końcu
@@ -349,16 +404,8 @@ void obsluga(void)
 // Main entry point
 int main(int argc, char **argv)
 {
-    if (argc != 4)
-    {
-        LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+    if (dolacz_ipc_z_argv(argc, argv, 0, NULL) != 0)
         return 1;
-    }
-
-    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
-    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
-    common_ctx->msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
-    dolacz_ipc(shm, sem);
     obsluga();
     return 0;
 }

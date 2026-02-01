@@ -13,6 +13,60 @@
 struct CommonCtx common_ctx_storage = {0};
 struct CommonCtx *common_ctx = &common_ctx_storage;
 
+static void init_shared_mutex(pthread_mutex_t *mutex, const char *err)
+{
+    pthread_mutexattr_t mattr;
+    if (pthread_mutexattr_init(&mattr) != 0 ||
+        pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED) != 0 ||
+        pthread_mutex_init(mutex, &mattr) != 0)
+    {
+        LOGE("%s", err);
+        exit(1);
+    }
+    (void)pthread_mutexattr_destroy(&mattr);
+}
+
+static void init_shared_cond(pthread_cond_t *cond, const char *err)
+{
+    pthread_condattr_t cattr;
+    if (pthread_condattr_init(&cattr) != 0 ||
+        pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED) != 0 ||
+        pthread_cond_init(cond, &cattr) != 0)
+    {
+        LOGE("%s", err);
+        exit(1);
+    }
+    (void)pthread_condattr_destroy(&cattr);
+}
+
+static void assign_shared_layout(void *base)
+{
+    common_ctx->stoliki = (struct Stolik *)base;
+    common_ctx->tasma = (struct Talerzyk *)(common_ctx->stoliki + MAX_STOLIKI);
+    common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA);
+    common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6;
+    common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6;
+    common_ctx->klienci_w_kolejce = common_ctx->restauracja_otwarta + 1;
+    common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;
+    common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1;
+
+    common_ctx->pid_obsluga_shm = (pid_t *)(common_ctx->klienci_opuscili + 1);
+    common_ctx->pid_kierownik_shm = common_ctx->pid_obsluga_shm + 1;
+    common_ctx->stoliki_sync = (struct StolikiSync *)(common_ctx->pid_kierownik_shm + 1);
+    common_ctx->tasma_sync = (struct TasmaSync *)(common_ctx->stoliki_sync + 1);
+    common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
+}
+
+static void init_semaphores(void)
+{
+    common_ctx->sem_id = semget(IPC_PRIVATE, 7, IPC_CREAT | 0600);
+    int sem_idxs[] = {SEM_TURA, SEM_KIEROWNIK, SEM_TURA_TURN1,
+                      SEM_TURA_TURN2, SEM_TURA_TURN3, SEM_PARENT_NOTIFY2,
+                      SEM_PARENT_NOTIFY3};
+    for (size_t i = 0; i < sizeof(sem_idxs) / sizeof(sem_idxs[0]); i++)
+        semctl(common_ctx->sem_id, sem_idxs[i], SETVAL, 0);
+}
+
 /* Unified default for number of random groups is provided at runtime
  * (RESTAURACJA_LICZBA_KLIENTOW). Initialize to 0 here so the
  * runtime initializer (`init_restauracja`) sets the actual value. */
@@ -177,60 +231,6 @@ int znajdz_stolik_dla_grupy_zablokowanej(
     return -1;
 }
 
-void generator_stolikow(
-    struct Stolik *stoliki_local) // generuje stoliki w restauracji
-{
-    int idx = 0;
-    for (int i = 0; i < 4; i++)
-    {
-        for (int j = 0; j < ILOSC_STOLIKOW[i]; j++)
-        {
-            int suma_poprzednich = 0;
-            for (int k = 0; k < i; k++)
-                suma_poprzednich += ILOSC_STOLIKOW[k];
-
-            idx = suma_poprzednich + j;
-            stoliki_local[idx].numer_stolika = idx + 1;
-            stoliki_local[idx].pojemnosc = i + 1;
-            stoliki_local[idx].liczba_grup = 0;
-            stoliki_local[idx].zajete_miejsca = 0;
-            memset(stoliki_local[idx].grupy, 0, sizeof(stoliki_local[idx].grupy));
-
-            LOGP("Stolik %d o pojemności %d utworzony.\n",
-                 stoliki_local[idx].numer_stolika, stoliki_local[idx].pojemnosc);
-        }
-    }
-}
-
-// ====== TASMA ======
-void dodaj_danie(struct Talerzyk *tasma_local,
-                 int cena) // dodaje danie na taśmę
-{
-    while (common_ctx->tasma_sync->count >= MAX_TASMA)
-    {
-        (void)pthread_cond_wait(&common_ctx->tasma_sync->not_full, &common_ctx->tasma_sync->mutex);
-    }
-
-    do
-    {
-        struct Talerzyk ostatni = tasma_local[MAX_TASMA - 1];
-
-        for (int i = MAX_TASMA - 1; i > 0; i--)
-        {
-            tasma_local[i] = tasma_local[i - 1];
-        }
-
-        tasma_local[0] = ostatni; // WRACA NA POCZĄTEK
-    } while (tasma_local[0].cena != 0);
-
-    tasma_local[0].cena = cena;
-    tasma_local[0].stolik_specjalny = 0;
-    common_ctx->tasma_sync->count++;
-    pthread_cond_signal(&common_ctx->tasma_sync->not_empty);
-    LOGD("dodaj_danie: wydano danie za %d zł na taśmę (count=%d)\n", cena,
-         common_ctx->tasma_sync->count);
-}
-
 // ====== OPERACJE IPC ======
 void sem_operacja(int sem, int val) // wykonuje operację na semaforze
 {
@@ -282,94 +282,34 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
         exit(1);
     }
     memset(pamiec_wspoldzielona, 0, bufor_size); // wyczyść pamięć współdzieloną
-
-    common_ctx->stoliki = (struct Stolik *)pamiec_wspoldzielona;                // wskaźnik na stoliki
-    common_ctx->tasma = (struct Talerzyk *)(common_ctx->stoliki + MAX_STOLIKI); // wskaźnik na taśmę
-    common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA);  // kuchnia - liczba wydanych dań
-    common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6;    // kasa - liczba sprzedanych dań
-    common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6;     // flaga czy restauracja jest otwarta
-    common_ctx->klienci_w_kolejce = common_ctx->restauracja_otwarta + 1;        // statystyka: klienci w kolejce
-    common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;           // statystyka: klienci przyjęci
-    common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1;            // statystyka: klienci którzy opuścili
-
-    common_ctx->pid_obsluga_shm = (pid_t *)(common_ctx->klienci_opuscili + 1); // wskaźnik na PID procesu obsługi w pamięci współdzielonej
-    common_ctx->pid_kierownik_shm = common_ctx->pid_obsluga_shm + 1;           // wskaźnik na PID procesu kierownika w pamięci współdzielonej
-    common_ctx->stoliki_sync = (struct StolikiSync *)(common_ctx->pid_kierownik_shm + 1);
-    common_ctx->tasma_sync = (struct TasmaSync *)(common_ctx->stoliki_sync + 1);
-    common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
+    assign_shared_layout(pamiec_wspoldzielona);
 
     common_ctx->tasma_sync->count = 0;
-    pthread_mutexattr_t mattr;
-    pthread_condattr_t cattr;
-    if (pthread_mutexattr_init(&mattr) != 0 ||
-        pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED) != 0 ||
-        pthread_mutex_init(&common_ctx->tasma_sync->mutex, &mattr) != 0)
-    {
-        LOGE("Nie udało się zainicjalizować mutexa taśmy\n");
-        exit(1);
-    }
-    if (pthread_condattr_init(&cattr) != 0 ||
-        pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED) != 0 ||
-        pthread_cond_init(&common_ctx->tasma_sync->not_full, &cattr) != 0 ||
-        pthread_cond_init(&common_ctx->tasma_sync->not_empty, &cattr) != 0)
-    {
-        LOGE("Nie udało się zainicjalizować cond taśmy\n");
-        exit(1);
-    }
-    (void)pthread_mutexattr_destroy(&mattr);
-    (void)pthread_condattr_destroy(&cattr);
+    init_shared_mutex(&common_ctx->tasma_sync->mutex,
+                      "Nie udało się zainicjalizować mutexa taśmy\n");
+    init_shared_cond(&common_ctx->tasma_sync->not_full,
+                     "Nie udało się zainicjalizować cond taśmy\n");
+    init_shared_cond(&common_ctx->tasma_sync->not_empty,
+                     "Nie udało się zainicjalizować cond taśmy\n");
 
-    /* Zainicjalizuj mutex stolików (współdzielony między procesami) */
-    if (pthread_mutexattr_init(&mattr) != 0 ||
-        pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED) != 0 ||
-        pthread_mutex_init(&common_ctx->stoliki_sync->mutex, &mattr) != 0)
-    {
-        LOGE("Nie udało się zainicjalizować mutexa stolików\n");
-        exit(1);
-    }
-    /* Zainicjalizuj cond dla stolików (współdzielony między procesami) */
-    if (pthread_condattr_init(&cattr) != 0 ||
-        pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED) != 0 ||
-        pthread_cond_init(&common_ctx->stoliki_sync->cond, &cattr) != 0)
-    {
-        LOGE("Nie udało się zainicjalizować cond stolików\n");
-        exit(1);
-    }
-    (void)pthread_mutexattr_destroy(&mattr);
-    (void)pthread_condattr_destroy(&cattr);
+    /* Zainicjalizuj mutex/cond stolików (współdzielone między procesami) */
+    init_shared_mutex(&common_ctx->stoliki_sync->mutex,
+                      "Nie udało się zainicjalizować mutexa stolików\n");
+    init_shared_cond(&common_ctx->stoliki_sync->cond,
+                     "Nie udało się zainicjalizować cond stolików\n");
 
     /* Zainicjalizuj synchronizację kolejki (współdzielona między procesami) */
     common_ctx->queue_sync->count = 0;
     common_ctx->queue_sync->max = MAX_KOLEJKA_MSG - KOLEJKA_REZERWA;
-    if (pthread_mutexattr_init(&mattr) != 0 ||
-        pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED) != 0 ||
-        pthread_mutex_init(&common_ctx->queue_sync->mutex, &mattr) != 0)
-    {
-        LOGE("Nie udało się zainicjalizować mutexa kolejki\n");
-        exit(1);
-    }
-    if (pthread_condattr_init(&cattr) != 0 ||
-        pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED) != 0 ||
-        pthread_cond_init(&common_ctx->queue_sync->not_full, &cattr) != 0 ||
-        pthread_cond_init(&common_ctx->queue_sync->not_empty, &cattr) != 0)
-    {
-        LOGE("Nie udało się zainicjalizować cond kolejki\n");
-        exit(1);
-    }
-    (void)pthread_mutexattr_destroy(&mattr);
-    (void)pthread_condattr_destroy(&cattr);
+    init_shared_mutex(&common_ctx->queue_sync->mutex,
+                      "Nie udało się zainicjalizować mutexa kolejki\n");
+    init_shared_cond(&common_ctx->queue_sync->not_full,
+                     "Nie udało się zainicjalizować cond kolejki\n");
+    init_shared_cond(&common_ctx->queue_sync->not_empty,
+                     "Nie udało się zainicjalizować cond kolejki\n");
 
-    /* Allocate semaphores: existing usage expects at least the open token
-     * and the kierownik semaphore; add dedicated semaphores for turns 1..3. */
-    common_ctx->sem_id = semget(IPC_PRIVATE, 7,
-                                IPC_CREAT | 0600);             // utwórz semafory
-    semctl(common_ctx->sem_id, SEM_TURA, SETVAL, 0);           // semafor otwarcia
-    semctl(common_ctx->sem_id, SEM_KIEROWNIK, SETVAL, 0);      // semafor wybudzający kierownika
-    semctl(common_ctx->sem_id, SEM_TURA_TURN1, SETVAL, 0);     // semafor tury 1
-    semctl(common_ctx->sem_id, SEM_TURA_TURN2, SETVAL, 0);     // semafor tury 2
-    semctl(common_ctx->sem_id, SEM_TURA_TURN3, SETVAL, 0);     // semafor tury 3
-    semctl(common_ctx->sem_id, SEM_PARENT_NOTIFY2, SETVAL, 0); // parent notify for turn2
-    semctl(common_ctx->sem_id, SEM_PARENT_NOTIFY3, SETVAL, 0); // parent notify for turn3
+    /* Semafory (otwarcie, kierownik, tury, powiadomienia) */
+    init_semaphores();
 
     common_ctx->msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (common_ctx->msgq_id < 0)
@@ -393,301 +333,31 @@ void dolacz_ipc(
         LOGE_ERRNO("shmat");
         exit(1);
     }
-
-    common_ctx->stoliki = (struct Stolik *)pamiec_wspoldzielona;
-    common_ctx->tasma = (struct Talerzyk *)(common_ctx->stoliki + MAX_STOLIKI);
-    common_ctx->kuchnia_dania_wydane = (int *)(common_ctx->tasma + MAX_TASMA);
-    common_ctx->kasa_dania_sprzedane = common_ctx->kuchnia_dania_wydane + 6;
-    common_ctx->restauracja_otwarta = common_ctx->kasa_dania_sprzedane + 6;
-    common_ctx->klienci_w_kolejce = common_ctx->restauracja_otwarta + 1;
-    common_ctx->klienci_przyjeci = common_ctx->klienci_w_kolejce + 1;
-    common_ctx->klienci_opuscili = common_ctx->klienci_przyjeci + 1;
-
-    common_ctx->pid_obsluga_shm = (pid_t *)(common_ctx->klienci_opuscili + 1);
-    common_ctx->pid_kierownik_shm = common_ctx->pid_obsluga_shm + 1;
-    common_ctx->stoliki_sync = (struct StolikiSync *)(common_ctx->pid_kierownik_shm + 1);
-    common_ctx->tasma_sync = (struct TasmaSync *)(common_ctx->stoliki_sync + 1);
-    common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
+    assign_shared_layout(pamiec_wspoldzielona);
 }
 
-// ====== KOLEJKA ======
-typedef struct // komunikat kolejki
+int dolacz_ipc_z_argv(int argc, char **argv, int potrzebuje_grupy,
+                      int *out_numer_grupy)
 {
-    long mtype;
-    struct Grupa grupa;
-} QueueMsg;
-
-void kolejka_dodaj(struct Grupa g) // dodaje grupę do kolejki
-{
-    QueueMsg msg;
-    msg.mtype = 1;
-    msg.grupa = g;
-    for (;;)
+    int oczekiwane = potrzebuje_grupy ? 5 : 4;
+    if (argc != oczekiwane)
     {
-        if (!*common_ctx->restauracja_otwarta)
-            return;
-
-        /* Zarezerwuj slot używając queue_sync. Blokuj z timeoutem podobnym do
-         * semtimedop. */
-        struct timespec now, abstime;
-        clock_gettime(CLOCK_REALTIME, &now);
-        abstime = now;
-        abstime.tv_sec += 1; /* 1s timeout */
-
-        if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) != 0)
-            continue;
-        while (common_ctx->queue_sync->count >= common_ctx->queue_sync->max)
-        {
-            int rc = pthread_cond_timedwait(&common_ctx->queue_sync->not_full, &common_ctx->queue_sync->mutex,
-                                            &abstime);
-            if (rc == ETIMEDOUT)
-            {
-                if (!*common_ctx->restauracja_otwarta)
-                {
-                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-                    return;
-                }
-                /* przeliczenie abstime dla następnego czekania */
-                clock_gettime(CLOCK_REALTIME, &now);
-                abstime = now;
-                abstime.tv_sec += 1;
-                continue;
-            }
-            if (rc != 0)
-            {
-                /* przerwane lub błąd */
-                if (common_ctx->shutdown_flag_ptr && *common_ctx->shutdown_flag_ptr)
-                {
-                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-                    exit(0);
-                }
-                /* spróbuj ponownie */
-                continue;
-            }
-        }
-
-        /* Mamy zarezerwowany slot logicznie; spróbuj wysłać wiadomość. */
-        if (msgsnd(common_ctx->msgq_id, &msg, sizeof(msg.grupa), IPC_NOWAIT) == 0)
-        {
-            common_ctx->queue_sync->count++;
-            /* Zliczamy rzeczywistą liczbę klientów (osób), nie tylko grup. */
-            (*common_ctx->klienci_w_kolejce) += msg.grupa.osoby;
-            pthread_cond_signal(&common_ctx->queue_sync->not_empty);
-            pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-            return;
-        }
-
-        /* Nie udało się wysłać - zwolnij zarezerwowany slot. */
-        pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-
-        if (errno == EINTR)
-            continue;
-        if (errno == EAGAIN)
-            continue; /* kolejka pełna - spróbuj ponownie */
-        if (errno == EIDRM || errno == EINVAL)
-            exit(0);
-
-        return;
-    }
-}
-
-struct Grupa kolejka_pobierz(void) // pobiera grupę z kolejki
-{
-    struct Grupa g = {0};
-    QueueMsg msg;
-    /* Użyj nieblokującego odbioru, aby szybko reagować na zamknięcie.
-       Jeśli nie ma wiadomości, śpij krótko i spróbuj ponownie. Nadal
-       zwalniamy slot semafora po pomyślnym odbiorze. */
-    /* Użyj semafora licznika wiadomości, aby czekać na wiadomości bez aktywnego
-       czekania. Próbujemy nieblokującego decrementu na SEM_MSGS; jeśli się
-       powiedzie, wiadomość powinna być dostępna i pobieramy ją z nieblokującym
-       msgrcv. Jeśli nie ma wiadomości lub restauracja się zamyka, zwracamy. */
-    /* Blokuj na semaforze licznika wiadomości (czekaj na producenta). Używanie
-       blokującego semop pozwala konsumentom spać tutaj, dopóki wiadomość nie
-       będzie dostępna, jednocześnie obsługując EINTR i zamknięcie czysto. */
-    for (;;)
-    {
-        if (!*common_ctx->restauracja_otwarta)
-            return g;
-
-        if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) != 0)
-            continue;
-        struct timespec now, abstime;
-        clock_gettime(CLOCK_REALTIME, &now);
-        abstime = now;
-        abstime.tv_sec += 1; /* 1s timeout */
-        while (common_ctx->queue_sync->count <= 0)
-        {
-            if (!*common_ctx->restauracja_otwarta)
-            {
-                pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-                return g;
-            }
-            int rc = pthread_cond_timedwait(&common_ctx->queue_sync->not_empty,
-                                            &common_ctx->queue_sync->mutex, &abstime);
-            if (rc == ETIMEDOUT)
-            {
-                if (!*common_ctx->restauracja_otwarta ||
-                    (common_ctx->shutdown_flag_ptr && *common_ctx->shutdown_flag_ptr))
-                {
-                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-                    return g;
-                }
-                clock_gettime(CLOCK_REALTIME, &now);
-                abstime = now;
-                abstime.tv_sec += 1;
-                continue;
-            }
-            if (rc != 0)
-            {
-                if (common_ctx->shutdown_flag_ptr && *common_ctx->shutdown_flag_ptr)
-                {
-                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-                    exit(0);
-                }
-                continue;
-            }
-        }
-
-        /* Zarezerwuj jeden token wiadomości i spróbuj odebrać bez blokowania. */
-        common_ctx->queue_sync->count--;
-        pthread_cond_signal(&common_ctx->queue_sync->not_full);
-        pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-
-        ssize_t r = msgrcv(common_ctx->msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
-        if (r >= 0)
-        {
-            if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) == 0)
-            {
-                if (*common_ctx->klienci_w_kolejce >= msg.grupa.osoby)
-                    *common_ctx->klienci_w_kolejce -= msg.grupa.osoby;
-                else
-                    *common_ctx->klienci_w_kolejce = 0;
-                pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-            }
-            return msg.grupa;
-        }
-
-        /* Jeśli odbiór się nie udał, przywróć token i obsłuż błędy. */
-        LOGD("kolejka_pobierz: pid=%d msgrcv failed errno=%d\n", (int)getpid(),
-             errno);
-        if (errno == EINTR)
-        {
-            /* Przywróć count, ponieważ wiadomość nie została zużyta. */
-            if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) == 0)
-            {
-                common_ctx->queue_sync->count++;
-                pthread_cond_signal(&common_ctx->queue_sync->not_empty);
-                pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-            }
-            continue;
-        }
-        if (errno == ENOMSG)
-        {
-            /* Count był przestarzały; przywróć licznik i spróbuj ponownie. */
-            if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) == 0)
-            {
-                common_ctx->queue_sync->count++;
-                pthread_cond_signal(&common_ctx->queue_sync->not_empty);
-                pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-            }
-            continue;
-        }
-
-        if (errno == EIDRM || errno == EINVAL)
-            exit(0);
-
-        return g;
-    }
-}
-
-// ====== CZYSZCZENIE ======
-void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(
-    void) // kończy wszystkich klientów i czyści stan stolików i kolejki
-{
-    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n",
-         (int)getpid());
-
-    // Klienci usadzeni przy stolikach.
-    int stoliki_locked = 0;
-    struct timespec lock_deadline;
-    if (clock_gettime(CLOCK_REALTIME, &lock_deadline) == 0)
-    {
-        lock_deadline.tv_sec += 1;
-        if (common_ctx->stoliki_sync && pthread_mutex_timedlock(&common_ctx->stoliki_sync->mutex, &lock_deadline) == 0)
-            stoliki_locked = 1;
-    }
-    if (!stoliki_locked)
-
-        for (int i = 0; i < MAX_STOLIKI; i++)
-        {
-            for (int j = 0; j < common_ctx->stoliki[i].liczba_grup; j++)
-            {
-                pid_t pid = common_ctx->stoliki[i].grupy[j].proces_id;
-                if (pid > 0)
-                {
-                    (void)kill(pid, SIGTERM);
-                }
-            }
-
-            memset(common_ctx->stoliki[i].grupy, 0, sizeof(common_ctx->stoliki[i].grupy));
-            common_ctx->stoliki[i].liczba_grup = 0;
-            common_ctx->stoliki[i].zajete_miejsca = 0;
-        }
-    if (stoliki_locked)
-        pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-
-    // Klienci w kolejce wejściowej.
-    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n",
-         (int)getpid());
-    QueueMsg msg;
-    for (;;)
-    {
-        ssize_t r = msgrcv(common_ctx->msgq_id, &msg, sizeof(msg.grupa), 1, IPC_NOWAIT);
-        if (r < 0)
-        {
-            if (errno == ENOMSG)
-                break;
-            if (errno == EINTR)
-                continue;
-            if (errno == EIDRM || errno == EINVAL)
-                return;
-            break;
-        }
-
-        pid_t pid = msg.grupa.proces_id;
-        LOGD("zakoncz_klientow: pid=%d popped queued client pid=%d\n",
-             (int)getpid(), (int)pid);
-        if (pid > 0)
-        {
-            LOGD("zakoncz_klientow: pid=%d killing queued client pid=%d\n",
-                 (int)getpid(), (int)pid);
-            (void)kill(pid, SIGTERM);
-        }
-
-        // Zdjęliśmy komunikat z kolejki, więc zwalniamy slot w liczniku queue_sync.
-        /* Zaktualizuj queue_sync, aby zwolnić slot */
-        if (pthread_mutex_trylock(&common_ctx->queue_sync->mutex) == 0)
-        {
-            if (common_ctx->queue_sync->count > 0)
-                common_ctx->queue_sync->count--; /* defensywnie: upewnij się, że nie ujemne */
-            /* Zmniejsz liczbę klientów w kolejce o rozmiar tej grupy. */
-            if (common_ctx->klienci_w_kolejce && msg.grupa.osoby > 0)
-            {
-                if (*common_ctx->klienci_w_kolejce >= msg.grupa.osoby)
-                    *common_ctx->klienci_w_kolejce -= msg.grupa.osoby;
-                else
-                    *common_ctx->klienci_w_kolejce = 0;
-            }
-            pthread_cond_signal(&common_ctx->queue_sync->not_full);
-            pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
-        }
+        if (potrzebuje_grupy)
+            LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id> <numer_grupy>\n",
+                 argv[0]);
         else
-        {
-        }
+            LOGE("Użycie: %s <shm_id> <sem_id> <msgq_id>\n", argv[0]);
+        return 1;
     }
-    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n",
-         (int)getpid());
+
+    int shm = parsuj_int_lub_zakoncz("shm_id", argv[1]);
+    int sem = parsuj_int_lub_zakoncz("sem_id", argv[2]);
+    common_ctx->msgq_id = parsuj_int_lub_zakoncz("msgq_id", argv[3]);
+    if (potrzebuje_grupy && out_numer_grupy)
+        *out_numer_grupy = parsuj_int_lub_zakoncz("numer_grupy", argv[4]);
+
+    dolacz_ipc(shm, sem);
+    return 0;
 }
 
 // Funkcja dla kierownika do zamknięcia restauracji

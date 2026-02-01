@@ -38,40 +38,46 @@ void log_printf(char level, const char *fmt, ...);
 void log_printf_force_stdio(char level, const char *fmt, ...);
 
 // ====== MAKRA LOGOWANIA ======
-#define LOGI(...)                                                              \
-  do {                                                                         \
-    if (current_log_level >= 3)                                                \
-      log_printf('I', __VA_ARGS__);                                            \
+#define LOGI(...)                   \
+  do                                \
+  {                                 \
+    if (current_log_level >= 3)     \
+      log_printf('I', __VA_ARGS__); \
   } while (0)
 
-#define LOGD(...)                                                              \
-  do {                                                                         \
-    log_printf('D', __VA_ARGS__);                                              \
+#define LOGD(...)                 \
+  do                              \
+  {                               \
+    log_printf('D', __VA_ARGS__); \
   } while (0)
 
-#define LOGE(...)                                                              \
-  do {                                                                         \
-    if (current_log_level >= 2)                                                \
-      log_printf('E', __VA_ARGS__);                                            \
+#define LOGE(...)                   \
+  do                                \
+  {                                 \
+    if (current_log_level >= 2)     \
+      log_printf('E', __VA_ARGS__); \
   } while (0)
 
 // Podsumowania/komunikaty krytyczne: drukuj zawsze, niezależnie od LOG_LEVEL i
 // RESTAURACJA_LOG_STDIO.
-#define LOGS(...)                                                              \
-  do {                                                                         \
-    log_printf_force_stdio('I', __VA_ARGS__);                                  \
+#define LOGS(...)                             \
+  do                                          \
+  {                                           \
+    log_printf_force_stdio('I', __VA_ARGS__); \
   } while (0)
 
 // Ważne zdarzenia procesowe (widoczne w LOG_LEVEL >= 1)
-#define LOGP(...)                                                              \
-  do {                                                                         \
-    if (current_log_level >= 1)                                                \
-      log_printf('P', __VA_ARGS__);                                            \
+#define LOGP(...)                   \
+  do                                \
+  {                                 \
+    if (current_log_level >= 1)     \
+      log_printf('P', __VA_ARGS__); \
   } while (0)
 
-#define LOGE_ERRNO(prefix)                                                     \
-  do {                                                                         \
-    LOGE("%s: %s\n", (prefix), strerror(errno));                               \
+#define LOGE_ERRNO(prefix)                       \
+  do                                             \
+  {                                              \
+    LOGE("%s: %s\n", (prefix), strerror(errno)); \
   } while (0)
 
 #endif

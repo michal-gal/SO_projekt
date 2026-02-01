@@ -18,9 +18,9 @@ LDFLAGS = -pthread
 
 TARGET = restauracja
 PROCS = klient obsluga kucharz kierownik
-HEADERS = common.h restauracja.h log.h
+HEADERS = common.h restauracja.h log.h queue.h
 
-COMMON_OBJS = common.o log.o
+COMMON_OBJS = common.o log.o queue.o
 
 OBJECTS_RESTAURACJA = restauracja.o $(COMMON_OBJS)
 OBJECTS_KLIENT = klient.o $(COMMON_OBJS)
@@ -54,6 +54,9 @@ common.o: common.c $(HEADERS)
 
 log.o: log.c log.h
 	$(CC) $(CFLAGS) -c log.c
+
+queue.o: queue.c queue.h common.h
+	$(CC) $(CFLAGS) -c queue.c
 
 klient.o: klient.c $(HEADERS)
 	$(CC) $(CFLAGS) -c klient.c

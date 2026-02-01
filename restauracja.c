@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <sched.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
@@ -308,6 +309,8 @@ generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grupę klientów
 
 // ====== AWARYJNE ZAMKNIĘCIE ======
 
+static void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(void);
+
 static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
 {
     // Błąd fork() nie powinien zostawiać osieroconych procesów/IPC.
@@ -339,6 +342,120 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
     fprintf(stderr,
             "Awaryjne zamknięcie: nie udało się utworzyć procesu (fork).\n");
     return 1;
+}
+
+static void generator_stolikow(struct Stolik *stoliki_local)
+{
+    int idx = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        for (int j = 0; j < ILOSC_STOLIKOW[i]; j++)
+        {
+            int suma_poprzednich = 0;
+            for (int k = 0; k < i; k++)
+                suma_poprzednich += ILOSC_STOLIKOW[k];
+
+            idx = suma_poprzednich + j;
+            stoliki_local[idx].numer_stolika = idx + 1;
+            stoliki_local[idx].pojemnosc = i + 1;
+            stoliki_local[idx].liczba_grup = 0;
+            stoliki_local[idx].zajete_miejsca = 0;
+            memset(stoliki_local[idx].grupy, 0,
+                   sizeof(stoliki_local[idx].grupy));
+
+            LOGP("Stolik %d o pojemności %d utworzony.\n",
+                 stoliki_local[idx].numer_stolika,
+                 stoliki_local[idx].pojemnosc);
+        }
+    }
+}
+
+static void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(
+    void) // kończy wszystkich klientów i czyści stan stolików i kolejki
+{
+    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d start\n",
+         (int)getpid());
+
+    // Klienci usadzeni przy stolikach.
+    int stoliki_locked = 0;
+    struct timespec lock_deadline;
+    if (clock_gettime(CLOCK_REALTIME, &lock_deadline) == 0)
+    {
+        lock_deadline.tv_sec += 1;
+        if (common_ctx->stoliki_sync &&
+            pthread_mutex_timedlock(&common_ctx->stoliki_sync->mutex,
+                                    &lock_deadline) == 0)
+            stoliki_locked = 1;
+    }
+    if (!stoliki_locked)
+
+        for (int i = 0; i < MAX_STOLIKI; i++)
+        {
+            for (int j = 0; j < common_ctx->stoliki[i].liczba_grup; j++)
+            {
+                pid_t pid = common_ctx->stoliki[i].grupy[j].proces_id;
+                if (pid > 0)
+                {
+                    (void)kill(pid, SIGTERM);
+                }
+            }
+
+            memset(common_ctx->stoliki[i].grupy, 0,
+                   sizeof(common_ctx->stoliki[i].grupy));
+            common_ctx->stoliki[i].liczba_grup = 0;
+            common_ctx->stoliki[i].zajete_miejsca = 0;
+        }
+    if (stoliki_locked)
+        pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
+
+    // Klienci w kolejce wejściowej.
+    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d cleaning queue\n",
+         (int)getpid());
+    QueueMsg msg;
+    for (;;)
+    {
+        ssize_t r = msgrcv(common_ctx->msgq_id, &msg, sizeof(msg.grupa), 1,
+                           IPC_NOWAIT);
+        if (r < 0)
+        {
+            if (errno == ENOMSG)
+                break;
+            if (errno == EINTR)
+                continue;
+            if (errno == EIDRM || errno == EINVAL)
+                return;
+            break;
+        }
+
+        pid_t pid = msg.grupa.proces_id;
+        LOGD("zakoncz_klientow: pid=%d popped queued client pid=%d\n",
+             (int)getpid(), (int)pid);
+        if (pid > 0)
+        {
+            LOGD("zakoncz_klientow: pid=%d killing queued client pid=%d\n",
+                 (int)getpid(), (int)pid);
+            (void)kill(pid, SIGTERM);
+        }
+
+        // Zdjęliśmy komunikat z kolejki, więc zwalniamy slot w liczniku queue_sync.
+        if (pthread_mutex_trylock(&common_ctx->queue_sync->mutex) == 0)
+        {
+            if (common_ctx->queue_sync->count > 0)
+                common_ctx->queue_sync->count--;
+            /* Zmniejsz liczbę klientów w kolejce o rozmiar tej grupy. */
+            if (common_ctx->klienci_w_kolejce && msg.grupa.osoby > 0)
+            {
+                if (*common_ctx->klienci_w_kolejce >= msg.grupa.osoby)
+                    *common_ctx->klienci_w_kolejce -= msg.grupa.osoby;
+                else
+                    *common_ctx->klienci_w_kolejce = 0;
+            }
+            pthread_cond_signal(&common_ctx->queue_sync->not_full);
+            pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
+        }
+    }
+    LOGD("zakoncz_klientow_i_wyczysc_stoliki_i_kolejke: pid=%d done\n",
+         (int)getpid());
 }
 
 // ====== MAIN ======
@@ -400,21 +517,16 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
         log_level = (int)v;
     }
 
-    /* Set the single authoritative client count for this run. */
+    /* Ustaw globalne wartości dla bieżącego uruchomienia. */
     liczba_klientow = klienci;
     czas_pracy_domyslny = czas;
     current_log_level = log_level;
 
     char log_level_str[3];
-    /* Finalize log level and export to logger via LOG_LEVEL env var. */
     snprintf(log_level_str, sizeof(log_level_str), "%d", log_level);
     setenv("LOG_LEVEL", log_level_str, 1);
 
     zainicjuj_losowosc();
-
-    /* Ensure the global default reflects the final chosen runtime so there
-     * is a single authoritative source for "czas pracy" across modules. */
-    czas_pracy_domyslny = czas;
 
     stworz_ipc();
     generator_stolikow(common_ctx->stoliki);
@@ -465,31 +577,14 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
  */
 int shutdown_restauracja(int *status)
 {
-    LOGD("restauracja: pid=%d initiating shutdown sequence\n", (int)getpid());
-
-    LOGD("restauracja: pid=%d calling "
-         "zakoncz_klientow_i_wyczysc_stoliki_i_kolejke()\n",
-         (int)getpid());
     zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
-    LOGD("restauracja: pid=%d returned from zakoncz_klientow...\n",
-         (int)getpid());
-
-    LOGD("restauracja: pid=%d calling zakoncz_wszystkie_dzieci()\n",
-         (int)getpid());
     zakoncz_wszystkie_dzieci(status);
-    LOGD("restauracja: pid=%d returned from zakoncz_wszystkie_dzieci()\n",
-         (int)getpid());
-
-    LOGD("restauracja: pid=%d removing IPC resources shm=%d sem=%d msgq=%d\n",
-         (int)getpid(), common_ctx->shm_id, common_ctx->sem_id,
-         common_ctx->msgq_id);
     if (common_ctx->shm_id >= 0)
         shmctl(common_ctx->shm_id, IPC_RMID, NULL);
     if (common_ctx->sem_id >= 0)
         semctl(common_ctx->sem_id, 0, IPC_RMID);
     if (common_ctx->msgq_id >= 0)
         msgctl(common_ctx->msgq_id, IPC_RMID, NULL);
-    LOGD("restauracja: pid=%d IPC resources removed\n", (int)getpid());
 
     LOGS("\n=== STATYSTYKI KLIENTÓW ===\n");
     LOGS("Klienci przyjęci: %d\n", *common_ctx->klienci_przyjeci);
@@ -507,38 +602,9 @@ int run_restauracja(int czas_pracy)
     struct timespec start_czekania;
     clock_gettime(CLOCK_MONOTONIC, &start_czekania);
     int status;
-
-    int zforkowane_grupy = 0;
-    /* Default cap for concurrently active clients: prefer the configured
-     * total `liczba_klientow` when it's set (so the cap follows the total),
-     * otherwise fall back to the compile-time default. Env var can override. */
-    int max_aktywnych_klientow = (liczba_klientow > 0) ? liczba_klientow : 5000;
-    const char *max_env = getenv("RESTAURACJA_MAX_AKTYWNYCH_KLIENTOW");
-    if (max_env && *max_env)
-    {
-        errno = 0;
-        char *end = NULL;
-        long v = strtol(max_env, &end, 10);
-        if (errno == 0 && end && *end == '\0' && v > 0)
-            max_aktywnych_klientow = (int)v;
-    }
-
-    const char *disable_env = getenv("RESTAURACJA_DISABLE_MANAGER_CLOSE");
-    if (disable_env && strcmp(disable_env, "1") == 0)
-        common_ctx->disable_close = 1;
     int aktywni_klienci = 0;
     int liczba_utworzonych_grup = liczba_klientow;
-
     int kierownik_interval = KIEROWNIK_INTERVAL_DEFAULT;
-    const char *kier_env = getenv("RESTAURACJA_KIEROWNIK_INTERVAL");
-    if (kier_env && *kier_env)
-    {
-        errno = 0;
-        char *end = NULL;
-        long v = strtol(kier_env, &end, 10);
-        if (errno == 0 && end && *end == '\0' && v > 0)
-            kierownik_interval = (int)v;
-    }
     struct timespec last_kierownik_post;
     clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
     int numer_grupy = 1;
@@ -552,30 +618,10 @@ int run_restauracja(int czas_pracy)
         }
         aktywni_klienci -= zbierz_zombie_nieblokujaco(&status, 1);
 
-        while (aktywni_klienci >= max_aktywnych_klientow)
-        {
-            pid_t p = waitpid(-1, &status, 0);
-            if (p > 0)
-            {
-                if (p != common_ctx->pid_obsluga && p != common_ctx->pid_kucharz &&
-                    p != common_ctx->pid_kierownik)
-                    aktywni_klienci--;
-            }
-            else if (p < 0 && errno == EINTR)
-            {
-                continue;
-            }
-            else
-            {
-                break;
-            }
-        }
-
         pid_t pid = generator_utworz_jedna_grupe(numer_grupy++);
         if (pid > 0)
         {
             aktywni_klienci++;
-            zforkowane_grupy++;
         }
         if (liczba_utworzonych_grup == 0)
         {
@@ -583,31 +629,26 @@ int run_restauracja(int czas_pracy)
         }
     }
 
+    struct timespec sim_start;
+    clock_gettime(CLOCK_MONOTONIC, &sim_start);
+    while (elapsed_seconds_since(&sim_start) < czas_pracy &&
+           !ctx->sigint_requested)
     {
-        struct timespec sim_start;
-        clock_gettime(CLOCK_MONOTONIC, &sim_start);
-        while (elapsed_seconds_since(&sim_start) < czas_pracy &&
-               !ctx->sigint_requested)
+        if (kierownik_interval > 0 &&
+            elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
         {
-            if (kierownik_interval > 0 &&
-                elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
-            {
-                sem_operacja(SEM_KIEROWNIK, 1);
-                clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
-            }
-            (void)zbierz_zombie_nieblokujaco(&status, 0);
-            sched_yield();
+            sem_operacja(SEM_KIEROWNIK, 1);
+            clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
         }
+        (void)zbierz_zombie_nieblokujaco(&status, 0);
+        sched_yield();
     }
 
-    int koniec_czasu = (elapsed_seconds_since(&start_czekania) >= czas_pracy);
     int przerwano_sygnalem = ctx->sigint_requested;
-    int zamknieto_flaga = (!koniec_czasu && !przerwano_sygnalem &&
-                           !*common_ctx->restauracja_otwarta);
+    int restauracja_otwarta_przed = *common_ctx->restauracja_otwarta;
+    int czas_minal = (elapsed_seconds_since(&start_czekania) >= czas_pracy);
 
-    LOGD("restauracja: pid=%d shutdown flags: koniec_czasu=%d "
-         "przerwano_sygnalem=%d zamknieto_flaga=%d shutdown_signal=%d\n",
-         (int)getpid(), koniec_czasu, przerwano_sygnalem, zamknieto_flaga,
+    LOGD("restauracja: pid=%d shutdown_signal=%d\n", (int)getpid(),
          (int)ctx->shutdown_signal);
 
     *common_ctx->restauracja_otwarta = 0;
@@ -624,7 +665,7 @@ int run_restauracja(int czas_pracy)
             name = "SIGTERM";
         LOGS("\n===Przerwano pracę restauracji (%s)!===\n", name);
     }
-    else if (zamknieto_flaga)
+    else if (!czas_minal && !restauracja_otwarta_przed)
         LOGS("\n===Restauracja została zamknięta normalnie!===\n");
     else
         LOGS("\n===Czas pracy restauracji minął!===\n");
