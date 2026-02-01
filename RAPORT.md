@@ -78,10 +78,42 @@ Podsumowanie: wszystkie poniższe testy kończą się wynikiem **OK**.
 - Kryterium zaliczenia: po zakończeniu brak uruchomionych procesów `restauracja/obsluga/kucharz/kierownik/klient` powiązanych z sesją testu.
 - Wynik: **OK**.
 
-## Wskazanie istotnych fragmentów kodu
+## Linki do istotnych fragmentów kodu
 
-Wymagane konstrukcje i funkcje systemowe są użyte w następujących plikach:
+Poniżej wskazania miejsc w kodzie, które obrazują wymagane konstrukcje i funkcje systemowe.
+Ze względu na brak przypiętego commita w raporcie, podaję konkretne pliki i funkcje.
 
-- Pliki i logowanie: `log.c`, `log.h`
-- Procesy i sygnały: `restauracja.c`, `kierownik.c`, `obsluga.c`, `kucharz.c`, `szatnia.c`, `klient.c`
-- IPC (shm/sem/msg): `common.c`, `common.h`
+### a) Tworzenie i obsługa plików (creat(), open(), close(), read(), write(), unlink())
+
+- `open()` + `close()` + `atexit()` (logger): `log.c` → `inicjuj_log_raz()`, `zamknij_log_przy_wyjsciu()`
+- `write()` (zapis do pliku i na stdout/stderr): `log.c` → `loguj_vprintf()`, `loguj_blokiem()`
+
+### b) Tworzenie procesów (fork(), exec(), exit(), wait())
+
+- `fork()` + `execl()` + `_exit()`: `restauracja.c` → `uruchom_potomka_exec()`
+- `waitpid()` (zbieranie zombie): `restauracja.c` → `zbierz_zombie_nieblokujaco()`
+- `waitpid()` (końcowe domykanie): `restauracja.c` → `zakoncz_wszystkie_dzieci()`
+- `exit()` (przykład): `kierownik.c` → `kierownik()`
+
+### c) Obsługa sygnałów (kill(), raise(), signal(), sigaction())
+
+- `signal()` (podpięcie handlerów job-control): `restauracja.c` → `inicjuj_restauracje()`
+- `kill()` (forward i job-control): `restauracja.c` → `obsluz_sygnal_restauracji()`
+- `kill()` (SIGUSR1/SIGUSR2 do obsługi): `kierownik.c` → `kierownik_wyslij_sygnal_obsludze()`
+
+### d) Synchronizacja procesów/wątków (ftok(), semget(), semctl(), semop())
+
+- `semop()` (operacje na semaforach): `common.c` → `sem_operacja()`
+- `semget()` + `semctl()` (tworzenie/inicjalizacja): `common.c` → `inicjuj_semafory()`
+
+### e) Segmenty pamięci dzielonej (ftok(), shmget(), shmat(), shmdt(), shmctl())
+
+- `shmget()` + `shmat()` (tworzenie/dolaczanie): `common.c` → `stworz_ipc()`
+- `shmctl()` (sprzątanie): `restauracja.c` → `zamknij_restauracje()`
+
+### f) Kolejki komunikatów (ftok(), msgget(), msgsnd(), msgrcv(), msgctl())
+
+- `msgget()` (tworzenie): `common.c` → `stworz_ipc()`
+- `msgsnd()` (wysyłka): `klient.c` → `kolejka_dodaj()` / `kolejka_dodaj_local()`
+- `msgrcv()` (odbiór): `szatnia.c` → `kolejka_pobierz_local()`
+- `msgctl()` (sprzątanie): `restauracja.c` → `zamknij_restauracje()`
