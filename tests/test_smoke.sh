@@ -14,7 +14,7 @@ make clean && make
 
 echo "[smoke] run (timeout=${TIMEOUT_SEC}s) with file logging"
 set +e
-RESTAURACJA_LOG_FILE="$LOG_FILE" RESTAURACJA_LOG_STDIO=0 RESTAURACJA_SEED=123 RESTAURACJA_CZAS_PRACY=3 timeout "${TIMEOUT_SEC}" ./restauracja
+RESTAURACJA_LOG_FILE="$LOG_FILE" RESTAURACJA_LOG_STDIO=0 RESTAURACJA_SEED=123 RESTAURACJA_CZAS_PRACY=3 timeout "${TIMEOUT_SEC}" ./build/bin/restauracja
 rc=$?
 set -e
 

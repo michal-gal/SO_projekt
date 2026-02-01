@@ -55,6 +55,7 @@ static void przypisz_uklad_wspoldzielony(void *base)
     common_ctx->stoliki_sync = (struct StolikiSync *)(common_ctx->pid_kierownik_shm + 1);
     common_ctx->tasma_sync = (struct TasmaSync *)(common_ctx->stoliki_sync + 1);
     common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
+    common_ctx->statystyki_sync = (struct StatystykiSync *)(common_ctx->queue_sync + 1);
 }
 
 static void inicjuj_semafory(void)
@@ -67,14 +68,14 @@ static void inicjuj_semafory(void)
         semctl(common_ctx->sem_id, sem_idxs[i], SETVAL, 0);
 }
 
-/* Domyślna liczba grup jest ustawiana w runtime (RESTAURACJA_LICZBA_KLIENTOW).
+/* Domyślna liczba grup jest ustawiana w trakcie działania (RESTAURACJA_LICZBA_KLIENTOW).
  * Tutaj 0 oznacza "jeszcze nie ustawiono". */
 int liczba_klientow = 0;
 int czas_pracy_domyslny = CZAS_PRACY;
 
 // ====== ZMIENNE GLOBALNE ======
 
-const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4}; // liczba stolików 1..4
+const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4};         // liczba stolików 1..4
 const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań
 
 // ====== INICJALIZACJA ======
@@ -170,7 +171,7 @@ void czekaj_na_ture(int turn,
 
     if (!*shutdown)
     {
-        sem_operacja(sem_idx, -1);
+        (void)sem_operacja_bez_wyjscia(sem_idx, -1, shutdown);
     }
 }
 
@@ -188,8 +189,8 @@ int sem_probuj(int sem_idx)
     exit(1);
 }
 
-// Wait up to `seconds` for semaphore to be available. Returns 0 on success,
-// -1 on timeout.
+// Czekaj do `seconds` na semafor. Zwraca 0 przy sukcesie,
+// -1 przy przekroczeniu czasu.
 int sem_czekaj_sekund(int sem_idx, int seconds)
 {
     struct timespec start, now;
@@ -272,17 +273,40 @@ void sem_operacja(int sem, int val) // wykonuje operację na semaforze
     }
 }
 
+int sem_operacja_bez_wyjscia(int sem, int val, volatile sig_atomic_t *shutdown)
+{
+    struct sembuf sb = {sem, val, SEM_UNDO};
+    for (;;)
+    {
+        if (semop(common_ctx->sem_id, &sb, 1) == 0)
+            return 0;
+
+        if (errno == EINTR)
+        {
+            if (shutdown && *shutdown)
+                return -1;
+            continue;
+        }
+
+        if (errno == EIDRM || errno == EINVAL)
+            return -1;
+
+        return -1;
+    }
+}
+
 void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory)
 {
     int bufor_size =
         sizeof(struct Stolik) * MAX_STOLIKI + // pamięć na stoliki
         sizeof(struct Talerzyk) * MAX_TASMA + // pamięć na taśmę
         sizeof(int) *
-            (6 * 2 + 2 + 3 + 3) +    // pamięć na liczniki dań, flagi i statystyki
-        sizeof(pid_t) * 2 +          // pamięć na PID-y procesów
-        sizeof(struct StolikiSync) + // synchronizacja stolików
-        sizeof(struct TasmaSync) +   // synchronizacja taśmy
-        sizeof(struct QueueSync);    // synchronizacja kolejki
+            (6 * 2 + 2 + 3 + 3) +      // pamięć na liczniki dań, flagi i statystyki
+        sizeof(pid_t) * 2 +            // pamięć na PID-y procesów
+        sizeof(struct StolikiSync) +   // synchronizacja stolików
+        sizeof(struct TasmaSync) +     // synchronizacja taśmy
+        sizeof(struct QueueSync) +     // synchronizacja kolejki
+        sizeof(struct StatystykiSync); // synchronizacja statystyk
 
     common_ctx->shm_id = shmget(IPC_PRIVATE, bufor_size,
                                 IPC_CREAT | 0600); // utwórz pamięć współdzieloną
@@ -298,27 +322,31 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
 
     common_ctx->tasma_sync->count = 0;
     inicjuj_mutex_wspoldzielony(&common_ctx->tasma_sync->mutex,
-                      "Nie udało się zainicjalizować mutexa taśmy\n");
+                                "Nie udało się zainicjalizować mutexa taśmy\n");
     inicjuj_cond_wspoldzielony(&common_ctx->tasma_sync->not_full,
-                     "Nie udało się zainicjalizować cond taśmy\n");
+                               "Nie udało się zainicjalizować cond taśmy\n");
     inicjuj_cond_wspoldzielony(&common_ctx->tasma_sync->not_empty,
-                     "Nie udało się zainicjalizować cond taśmy\n");
+                               "Nie udało się zainicjalizować cond taśmy\n");
 
     /* Zainicjalizuj mutex/cond stolików (współdzielone między procesami) */
     inicjuj_mutex_wspoldzielony(&common_ctx->stoliki_sync->mutex,
-                      "Nie udało się zainicjalizować mutexa stolików\n");
+                                "Nie udało się zainicjalizować mutexa stolików\n");
     inicjuj_cond_wspoldzielony(&common_ctx->stoliki_sync->cond,
-                     "Nie udało się zainicjalizować cond stolików\n");
+                               "Nie udało się zainicjalizować cond stolików\n");
 
     /* Zainicjalizuj synchronizację kolejki (współdzielona między procesami) */
     common_ctx->queue_sync->count = 0;
     common_ctx->queue_sync->max = MAX_KOLEJKA_MSG - KOLEJKA_REZERWA;
     inicjuj_mutex_wspoldzielony(&common_ctx->queue_sync->mutex,
-                      "Nie udało się zainicjalizować mutexa kolejki\n");
+                                "Nie udało się zainicjalizować mutexa kolejki\n");
     inicjuj_cond_wspoldzielony(&common_ctx->queue_sync->not_full,
-                     "Nie udało się zainicjalizować cond kolejki\n");
+                               "Nie udało się zainicjalizować cond kolejki\n");
     inicjuj_cond_wspoldzielony(&common_ctx->queue_sync->not_empty,
-                     "Nie udało się zainicjalizować cond kolejki\n");
+                               "Nie udało się zainicjalizować cond kolejki\n");
+
+    /* Zainicjalizuj synchronizację statystyk (współdzielona między procesami) */
+    inicjuj_mutex_wspoldzielony(&common_ctx->statystyki_sync->mutex,
+                                "Nie udało się zainicjalizować mutexa statystyk\n");
 
     /* Semafory (otwarcie, kierownik, tury, powiadomienia) */
     inicjuj_semafory();

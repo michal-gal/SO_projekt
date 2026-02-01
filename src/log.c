@@ -4,13 +4,14 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 int current_log_level = LOG_LEVEL;
 
-/* Per-module logger context to avoid scattered static globals. */
+/* Kontekst loggera w module, aby uniknąć rozproszonych zmiennych statycznych. */
 struct LogCtx
 {
     int log_fd;
@@ -24,7 +25,7 @@ static struct LogCtx log_ctx_storage = {.log_fd = -1,
 static struct LogCtx *log_ctx = &log_ctx_storage;
 
 static const char *
-log_default_path(void) // generuje domyślną ścieżkę do pliku logu
+domyslna_sciezka_logu(void) // generuje domyślną ścieżkę do pliku logu
 {
     static char path[256];
     if (path[0] != '\0')
@@ -44,7 +45,7 @@ log_default_path(void) // generuje domyślną ścieżkę do pliku logu
 }
 
 static void
-log_close_at_exit(void) // zamyka plik logu przy zakończeniu programu
+zamknij_log_przy_wyjsciu(void) // zamyka plik logu przy zakończeniu programu
 {
     if (log_ctx->log_fd >= 0)
     {
@@ -53,7 +54,7 @@ log_close_at_exit(void) // zamyka plik logu przy zakończeniu programu
     }
 }
 
-static void log_init_once(void) // inicjalizuje logowanie tylko raz
+static void inicjuj_log_raz(void) // inicjalizuje logowanie tylko raz
 {
     if (log_ctx->log_inited)
         return;
@@ -68,9 +69,9 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
         path = getenv("LOG_FILE");
     if (!path || !*path)
     {
-        path = log_default_path();
-        // Ustaw zmienną środowiskową dla fork/exec potomków, aby używały tego
-        // samego pliku.
+        path = domyslna_sciezka_logu();
+        // Ustaw zmienną środowiskową dla fork/exec potomków, aby używały
+        // tego samego pliku.
         (void)setenv("RESTAURACJA_LOG_FILE", path, 0);
     }
 
@@ -85,8 +86,7 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
     if (fd >= 0)
     {
 #ifndef O_CLOEXEC
-        // Fallback: postaraj się ustawić FD_CLOEXEC, żeby nie przeciekał do
-        // procesów potomnych.
+        // Awaryjnie: ustaw FD_CLOEXEC, żeby nie przeciekał do potomków.
         int old_flags = fcntl(fd, F_GETFD);
         if (old_flags != -1)
             (void)fcntl(fd, F_SETFD, old_flags | FD_CLOEXEC);
@@ -95,11 +95,11 @@ static void log_init_once(void) // inicjalizuje logowanie tylko raz
     if (fd >= 0)
     {
         log_ctx->log_fd = fd;
-        atexit(log_close_at_exit);
+        atexit(zamknij_log_przy_wyjsciu);
     }
 }
 
-void log_init_from_env(
+void inicjuj_log_z_env(
     void) // inicjalizuje logowanie na podstawie zmiennych środowiskowych
 {
     // Czytaj LOG_LEVEL z env
@@ -115,12 +115,12 @@ void log_init_from_env(
         }
     }
 
-    log_init_once();
+    inicjuj_log_raz();
 }
 
 // Wspólna funkcja logowania z va_list
-static void log_vprintf(char level, const char *fmt, va_list ap,
-                        int force_stdio)
+static void loguj_vprintf(char level, const char *fmt, va_list ap,
+                          int force_stdio)
 {
     char msg[3072];
     int n = vsnprintf(msg, sizeof(msg), fmt, ap);
@@ -132,7 +132,7 @@ static void log_vprintf(char level, const char *fmt, va_list ap,
     if (msg_len >= sizeof(msg))
         msg_len = sizeof(msg) - 1;
 
-    // Prefix: YYYY-MM-DD HH:MM:SS pid=1234 L
+    // Prefiks: YYYY-MM-DD HH:MM:SS pid=1234 L
     time_t now = time(NULL);
     struct tm tm_now;
     localtime_r(&now, &tm_now);
@@ -175,7 +175,7 @@ static void log_vprintf(char level, const char *fmt, va_list ap,
         out_len += want;
     }
 
-    /* File policy: include more logs as LOG_LEVEL increases. */
+    /* Polityka pliku: więcej logów przy wyższym LOG_LEVEL. */
     int write_file = force_stdio;
     if (!write_file)
     {
@@ -195,10 +195,9 @@ static void log_vprintf(char level, const char *fmt, va_list ap,
         (void)write(log_ctx->log_fd, out, out_len);
 
     /*
-     * Console policy:
-     * - If `force_stdio` is set (used by LOGS), always print to console
-     *   (stderr for 'E', stdout otherwise).
-     * - Otherwise, print to console only for LOGP ('P') when enabled by env.
+     * Polityka konsoli:
+     * - Gdy `force_stdio` (LOGS), zawsze na konsolę (stderr dla 'E').
+     * - W pozostałych przypadkach tylko LOGP, jeśli włączono w env.
      */
     if (force_stdio)
     {
@@ -210,24 +209,79 @@ static void log_vprintf(char level, const char *fmt, va_list ap,
     }
 }
 
-void log_printf(char level, const char *fmt,
-                ...) // loguje komunikat z danym poziomem
+void loguj(char level, const char *fmt,
+           ...) // loguje komunikat z danym poziomem
 {
-    log_init_once();
+    inicjuj_log_raz();
 
     va_list ap;
     va_start(ap, fmt);
-    log_vprintf(level, fmt, ap, 0);
+    loguj_vprintf(level, fmt, ap, 0);
     va_end(ap);
 }
 
-void log_printf_force_stdio(char level, const char *fmt,
-                            ...) // loguje zawsze także na stdout/stderr
+void loguj_wymus_stdio(char level, const char *fmt,
+                       ...) // loguje zawsze także na stdout/stderr
 {
-    log_init_once();
+    inicjuj_log_raz();
 
     va_list ap;
     va_start(ap, fmt);
-    log_vprintf(level, fmt, ap, 1);
+    loguj_vprintf(level, fmt, ap, 1);
     va_end(ap);
+}
+
+void loguj_blokiem(char level, const char *buf) // loguje blokiem jednym zapisem
+{
+    inicjuj_log_raz();
+
+    if (!buf)
+        return;
+
+    size_t buf_len = strlen(buf);
+    if (buf_len == 0)
+        return;
+
+    time_t now = time(NULL);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+
+    char prefix[128];
+    int pn = snprintf(
+        prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d pid=%d %c ",
+        tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday, tm_now.tm_hour,
+        tm_now.tm_min, tm_now.tm_sec, (int)getpid(), level);
+    size_t prefix_len = (pn > 0) ? (size_t)pn : 0;
+    if (prefix_len >= sizeof(prefix))
+        prefix_len = sizeof(prefix) - 1;
+
+    size_t leading_nl = (buf[0] == '\n') ? 1 : 0;
+    const char *body = buf + leading_nl;
+    size_t body_len = buf_len - leading_nl;
+
+    size_t out_len = leading_nl + prefix_len + body_len;
+    char *out = (char *)malloc(out_len + 1);
+    if (!out)
+        return;
+
+    size_t pos = 0;
+    if (leading_nl)
+        out[pos++] = '\n';
+    if (prefix_len)
+    {
+        memcpy(out + pos, prefix, prefix_len);
+        pos += prefix_len;
+    }
+    if (body_len)
+    {
+        memcpy(out + pos, body, body_len);
+        pos += body_len;
+    }
+
+    if (log_ctx->log_fd >= 0)
+        (void)write(log_ctx->log_fd, out, pos);
+
+    (void)write((level == 'E') ? STDERR_FILENO : STDOUT_FILENO, out, pos);
+
+    free(out);
 }

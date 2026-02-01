@@ -1,9 +1,11 @@
 #include "obsluga.h"
 #include <sched.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-// Per-module context for obsluga
+// Kontekst modułu obsługi
 struct ObslugaCtx
 {
     volatile sig_atomic_t wydajnosc; // 1=wolno, 2=normalnie, 4=szybko
@@ -31,8 +33,10 @@ static int zbierz_zamowienia_specjalne(struct SpecOrder *orders, int max);
 static void wyczysc_rezerwacje_specjalne(const struct SpecOrder *orders,
                                          int count);
 static void dodaj_danie(struct Talerzyk *tasma_local, int cena);
+static void dopisz_do_bufora(char *buf, size_t rozmiar, size_t *offset,
+                             const char *fmt, ...);
 
-// Wątek podawania dań normalnych
+// Wątek podawania dań zwykłych
 static void *watek_podawania(void *arg)
 {
     (void)arg;
@@ -171,6 +175,27 @@ static void wyczysc_rezerwacje_specjalne(const struct SpecOrder *orders,
     pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
 }
 
+static void dopisz_do_bufora(char *buf, size_t rozmiar, size_t *offset,
+                             const char *fmt, ...)
+{
+    if (!buf || !offset || *offset >= rozmiar)
+        return;
+
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *offset, rozmiar - *offset, fmt, ap);
+    va_end(ap);
+
+    if (n <= 0)
+        return;
+
+    size_t dodano = (size_t)n;
+    if (dodano >= rozmiar - *offset)
+        *offset = rozmiar - 1;
+    else
+        *offset += dodano;
+}
+
 // Wątek drukujący podsumowanie na końcu
 static void *watek_podsumowanie(void *arg)
 {
@@ -222,7 +247,7 @@ static void obsluz_sygnal(int signo)
     }
 }
 
-// Serve normal dishes
+// Podawanie dań zwykłych
 static void obsluga_podaj_dania_normalne(double wydajnosc)
 {
     int serves = (int)wydajnosc;
@@ -240,20 +265,25 @@ static void obsluga_podaj_dania_normalne(double wydajnosc)
     }
 }
 
-// Print summary
+// Wydruk podsumowania
 static void wypisz_podsumowanie(void)
 {
-    LOGS("\n=== PODSUMOWANIE KASY ===\n");
+    char buf[4096];
+    size_t offset = 0;
+
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "\n\n\n=========== PODSUMOWANIE KASY ==================\n");
     int kasa_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        LOGS("Kasa - liczba sprzedanych dań za %d zł: %d\n", CENY_DAN[i],
-             common_ctx->kasa_dania_sprzedane[i]);
+        dopisz_do_bufora(buf, sizeof(buf), &offset,
+                         "Kasa - liczba sprzedanych dań za %d zł: %d\n",
+                         CENY_DAN[i], common_ctx->kasa_dania_sprzedane[i]);
         kasa_suma += common_ctx->kasa_dania_sprzedane[i] * CENY_DAN[i];
     }
-    LOGS("Suma: %d zł\n", kasa_suma);
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "================================================\nSuma: %d zł\n", kasa_suma);
 
-    LOGS("\n=== PODSUMOWANIE OBSŁUGI ===\n");
+    dopisz_do_bufora(buf, sizeof(buf), &offset,
+                     "\n=========== PODSUMOWANIE OBSŁUGI ===============\n");
     int tasma_dania_niesprzedane[6] = {0};
     pthread_mutex_lock(&common_ctx->tasma_sync->mutex);
     for (int i = 0; i < MAX_TASMA; i++)
@@ -269,35 +299,41 @@ static void wypisz_podsumowanie(void)
     int tasma_suma = 0;
     for (int i = 0; i < 6; i++)
     {
-        LOGS("Taśma - liczba niesprzedanych dań za %d zł: %d\n", CENY_DAN[i],
-             tasma_dania_niesprzedane[i]);
+        dopisz_do_bufora(buf, sizeof(buf), &offset,
+                         "Taśma - liczba niesprzedanych dań za %d zł: %d\n",
+                         CENY_DAN[i], tasma_dania_niesprzedane[i]);
         tasma_suma += tasma_dania_niesprzedane[i] * CENY_DAN[i];
     }
-    LOGS("===Suma: %d zł===\n", tasma_suma);
-    LOGS("\n\nObsługa kończy pracę.\n");
-    LOGS("Klienci w kolejce: %d\n", *common_ctx->klienci_w_kolejce);
-    LOGS("======================\n");
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "================================================\nSuma: %d zł\n",
+                     tasma_suma);
+    dopisz_do_bufora(buf, sizeof(buf), &offset,
+                     "\n================================================\nObsługa kończy pracę.\n");
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "Nieobsłużeni klienci czekający w kolejce: %d\n",
+                     *common_ctx->klienci_w_kolejce);
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "================================================\n");
 
-    fsync(STDOUT_FILENO); // Ensure all summary logs are flushed
+    loguj_blokiem('I', buf);
+
+    fsync(STDOUT_FILENO); // Dopilnuj, aby wszystkie logi podsumowania się zapisały
 }
 
-// Main service function
+// Główna funkcja obsługi
 void obsluga(void)
 {
     if (common_ctx->pid_obsluga_shm)
         *common_ctx->pid_obsluga_shm = getpid();
 
     zainicjuj_losowosc();
-    // Set signal handlers
+    // Ustaw obsługę sygnałów
     if (signal(SIGUSR1, obsluz_sygnal) == SIG_ERR)
         LOGE_ERRNO("signal(SIGUSR1)");
     if (signal(SIGUSR2, obsluz_sygnal) == SIG_ERR)
         LOGE_ERRNO("signal(SIGUSR2)");
-    common_install_sigterm_handler(&obsl_ctx->shutdown_requested);
+    ustaw_obsluge_sigterm(&obsl_ctx->shutdown_requested);
 
     ustaw_shutdown_flag(&obsl_ctx->shutdown_requested);
 
-    // Create threads
+    // Utwórz wątki
     pthread_t t_podawanie, t_specjalne, t_podsumowanie;
     if (pthread_create(&t_podawanie, NULL, watek_podawania, NULL) != 0)
         LOGE_ERRNO("pthread_create(podawanie)");
@@ -306,7 +342,7 @@ void obsluga(void)
     if (pthread_create(&t_podsumowanie, NULL, watek_podsumowanie, NULL) != 0)
         LOGE_ERRNO("pthread_create(podsumowanie)");
 
-    // Wait while restaurant is open; use stoliki_sync cond to avoid polling
+    // Czekaj, aż restauracja będzie otwarta; użyj cond stoliki_sync bez aktywnego odpytywania
     if (pthread_mutex_lock(&common_ctx->stoliki_sync->mutex) == 0)
     {
         while (*common_ctx->restauracja_otwarta && !obsl_ctx->shutdown_requested)
@@ -315,19 +351,19 @@ void obsluga(void)
         pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
     }
 
-    // Shutdown threads
+    // Zakończ wątki
     obsl_ctx->shutdown_requested = 1;
     (void)pthread_kill(t_podawanie, SIGTERM);
     (void)pthread_kill(t_specjalne, SIGTERM);
     (void)pthread_join(t_podawanie, NULL);
     (void)pthread_join(t_specjalne, NULL);
 
-    // Wait for summary thread to finish
+    // Poczekaj na zakończenie wątku podsumowania
     (void)pthread_join(t_podsumowanie, NULL);
     exit(0);
 }
 
-// Main entry point
+// Główny punkt wejścia
 int main(int argc, char **argv)
 {
     if (dolacz_ipc_z_argv(argc, argv, 0, NULL) != 0)

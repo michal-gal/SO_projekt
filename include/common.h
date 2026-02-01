@@ -117,6 +117,11 @@ struct QueueSync
   int max;
 };
 
+struct StatystykiSync
+{
+  pthread_mutex_t mutex;
+};
+
 typedef struct // komunikat kolejki
 {
   long mtype;
@@ -137,6 +142,7 @@ struct CommonCtx
   struct TasmaSync *tasma_sync;
   struct StolikiSync *stoliki_sync;
   struct QueueSync *queue_sync;
+  struct StatystykiSync *statystyki_sync;
   /* Usunięto: int *kolej_podsumowania; używamy semaforów tur. */
   int *klienci_w_kolejce;
   int *klienci_przyjeci;
@@ -169,6 +175,7 @@ extern const int CENY_DAN[6];
 
 /* Prototypy funkcji używanych między modułami. */
 void sem_operacja(int sem, int val);
+int sem_operacja_bez_wyjscia(int sem, int val, volatile sig_atomic_t *shutdown);
 void ustaw_shutdown_flag(volatile sig_atomic_t *flag);
 void ustaw_obsluge_sigterm(volatile sig_atomic_t *flag);
 void kierownik_zamknij_restauracje_i_zakoncz_klientow(void);

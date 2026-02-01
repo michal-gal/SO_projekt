@@ -12,7 +12,7 @@ rm -f "$LOG_FILE"
 make clean && make
 
 echo "[jobcontrol] start restauracja in background"
-RESTAURACJA_LOG_FILE="$LOG_FILE" RESTAURACJA_LOG_STDIO=0 RESTAURACJA_SEED=123 RESTAURACJA_CZAS_PRACY=30 ./restauracja &
+RESTAURACJA_LOG_FILE="$LOG_FILE" RESTAURACJA_LOG_STDIO=0 RESTAURACJA_SEED=123 RESTAURACJA_CZAS_PRACY=30 ./build/bin/restauracja &
 pid=$!
 
 sleep 1

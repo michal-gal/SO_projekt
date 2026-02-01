@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-// Per-module context for kierownik
+// Kontekst modułu kierownika
 struct KierownikCtx
 {
     volatile sig_atomic_t shutdown_requested;
@@ -15,8 +15,8 @@ static struct KierownikCtx *kier_ctx = &kier_ctx_storage;
 
 // Deklaracje wstępne
 static void kierownik_wyslij_sygnal(void);
-static void kierownik_send_obsluga_signal(pid_t pid_obsl, int signo,
-                                          const char *label);
+static void kierownik_wyslij_sygnal_obsludze(pid_t pid_obsl, int signo,
+                                             const char *label);
 
 // Wysyłanie sygnału do `obsluga` lub zamknięcie restauracji
 static void kierownik_wyslij_sygnal(void)
@@ -26,21 +26,23 @@ static void kierownik_wyslij_sygnal(void)
     // - SIGUSR2: zmniejsz wydajność
     // - SIGTERM: zamknij restaurację i zakończ klientów
     // Inne wartości = brak akcji (normalne działanie).
-    int random_value = rand() % 1000000; // Zmniejsz częstotliwość sygnałów ~10x
+    int losowa_wartosc = rand() % 1000000; // Zmniejsz częstotliwość sygnałów ~10x
     pid_t pid_obsl =
         common_ctx->pid_obsluga_shm
             ? *common_ctx->pid_obsluga_shm
             : 0; // Pobierz PID procesu `obsluga` z pamięci współdzielonej
 
-    if (random_value == 1) // ~0.0001% chance for SIGUSR1
+    if (losowa_wartosc == 1) // ~0.0001% szansy na SIGUSR1
     {
-        kierownik_send_obsluga_signal(pid_obsl, SIGUSR1, "kill(SIGUSR1) obsluga");
+        kierownik_wyslij_sygnal_obsludze(pid_obsl, SIGUSR1,
+                                         "kill(SIGUSR1) obsluga");
     }
-    else if (random_value == 2) // ~0.0001% chance for SIGUSR2
+    else if (losowa_wartosc == 2) // ~0.0001% szansy na SIGUSR2
     {
-        kierownik_send_obsluga_signal(pid_obsl, SIGUSR2, "kill(SIGUSR2) obsluga");
+        kierownik_wyslij_sygnal_obsludze(pid_obsl, SIGUSR2,
+                                         "kill(SIGUSR2) obsluga");
     }
-    else if (random_value == 3) // ~0.0001% chance to close restaurant
+    else if (losowa_wartosc == 3) // ~0.0001% szansy na zamknięcie restauracji
     {
         if (!common_ctx->disable_close)
         {
@@ -55,8 +57,8 @@ static void kierownik_wyslij_sygnal(void)
     }
 }
 
-static void kierownik_send_obsluga_signal(pid_t pid_obsl, int signo,
-                                          const char *label)
+static void kierownik_wyslij_sygnal_obsludze(pid_t pid_obsl, int signo,
+                                             const char *label)
 {
     if (pid_obsl <= 0)
         return;
@@ -64,7 +66,7 @@ static void kierownik_send_obsluga_signal(pid_t pid_obsl, int signo,
         LOGE_ERRNO(label);
 }
 
-// Main manager function
+// Główna funkcja kierownika
 void kierownik(void)
 {
     if (common_ctx->pid_kierownik_shm)
@@ -72,8 +74,8 @@ void kierownik(void)
 
     zainicjuj_losowosc();
 
-    // Ustaw handler sygnału
-    common_install_sigterm_handler(&kier_ctx->shutdown_requested);
+    // Ustaw obsługę sygnału
+    ustaw_obsluge_sigterm(&kier_ctx->shutdown_requested);
 
     ustaw_shutdown_flag(&kier_ctx->shutdown_requested);
 
@@ -83,9 +85,9 @@ void kierownik(void)
     // `obsluga`.
     while (*common_ctx->restauracja_otwarta && !kier_ctx->shutdown_requested)
     {
-        LOGD("kierownik: pid=%d waiting SEM_KIEROWNIK\n", (int)getpid());
+        LOGD("kierownik: pid=%d czeka na SEM_KIEROWNIK\n", (int)getpid());
         sem_operacja(SEM_KIEROWNIK, -1);
-        LOGD("kierownik: pid=%d woke SEM_KIEROWNIK\n", (int)getpid());
+        LOGD("kierownik: pid=%d wybudzony SEM_KIEROWNIK\n", (int)getpid());
         kierownik_wyslij_sygnal();
         if (kier_ctx->shutdown_requested)
             break;
@@ -93,7 +95,7 @@ void kierownik(void)
 
     czekaj_na_ture(3, &kier_ctx->shutdown_requested);
 
-    LOGS("Kierownik kończy pracę.\n");
+    LOGS("\n\n================================================\nKierownik kończy pracę.\n================================================\n");
 
     fsync(STDOUT_FILENO); // Wymuś zapis logów
     exit(0);

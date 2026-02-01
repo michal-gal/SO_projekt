@@ -13,14 +13,17 @@ CFLAGS += # CLIENTS are controlled at runtime via program arguments / env
 # The program reads default client count from environment variable
 # RESTAURACJA_LICZBA_KLIENTOW at runtime.
 CFLAGS += # LOG_LEVEL and CZAS_PRACY are read from environment at runtime
+CFLAGS += -DBIN_DIR=\"$(BIN_DIR)\"
 CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread
 
 BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
+BIN_DIR = $(BUILD_DIR)/bin
 
-TARGET = restauracja
+TARGET = $(BIN_DIR)/restauracja
 PROCS = klient obsluga szatnia kucharz kierownik
+PROCS_BIN = $(addprefix $(BIN_DIR)/, $(PROCS))
 HEADERS = include/common.h include/restauracja.h include/log.h include/obsluga.h include/kucharz.h include/kierownik.h include/klient.h include/szatnia.h
 
 COMMON_OBJS = $(OBJ_DIR)/common.o $(OBJ_DIR)/log.o
@@ -32,24 +35,30 @@ OBJECTS_SZATNIA = $(OBJ_DIR)/szatnia.o $(COMMON_OBJS)
 OBJECTS_KUCHARZ = $(OBJ_DIR)/kucharz.o $(COMMON_OBJS)
 OBJECTS_KIEROWNIK = $(OBJ_DIR)/kierownik.o $(COMMON_OBJS)
 
-all: $(TARGET) $(PROCS)
+all: $(TARGET) $(PROCS_BIN)
 
 $(TARGET): $(OBJECTS_RESTAURACJA)
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $(TARGET) $(OBJECTS_RESTAURACJA)
 
-klient: $(OBJECTS_KLIENT)
+$(BIN_DIR)/klient: $(OBJECTS_KLIENT)
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_KLIENT)
 
-obsluga: $(OBJECTS_OBSLUGA)
+$(BIN_DIR)/obsluga: $(OBJECTS_OBSLUGA)
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_OBSLUGA)
 
-szatnia: $(OBJECTS_SZATNIA)
+$(BIN_DIR)/szatnia: $(OBJECTS_SZATNIA)
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_SZATNIA)
 
-kucharz: $(OBJECTS_KUCHARZ)
+$(BIN_DIR)/kucharz: $(OBJECTS_KUCHARZ)
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_KUCHARZ)
 
-kierownik: $(OBJECTS_KIEROWNIK)
+$(BIN_DIR)/kierownik: $(OBJECTS_KIEROWNIK)
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_KIEROWNIK)
 
 
@@ -88,8 +97,8 @@ $(OBJ_DIR)/kierownik.o: src/kierownik.c $(HEADERS)
 
 
 clean:
-	rm -f $(TARGET) $(PROCS) generator
-	rm -rf $(OBJ_DIR)
+	rm -f $(TARGET) $(PROCS_BIN) generator
+	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
 test: all
 	./tests/test_smoke.sh

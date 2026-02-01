@@ -65,7 +65,12 @@ void szatnia(void)
             LOGP("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
                  g.numer_grupy, numer_stolika, zajete, pojemnosc);
             /* Zliczamy osoby (klientów), a nie grupy. */
-            (*common_ctx->klienci_przyjeci) += g.osoby;
+            if (common_ctx->statystyki_sync &&
+                pthread_mutex_lock(&common_ctx->statystyki_sync->mutex) == 0)
+            {
+                (*common_ctx->klienci_przyjeci) += g.osoby;
+                pthread_mutex_unlock(&common_ctx->statystyki_sync->mutex);
+            }
             if (g.proces_id > 0)
                 (void)kill(g.proces_id, SIGUSR1);
         }
@@ -241,7 +246,7 @@ int main(int argc, char **argv)
     if (dolacz_ipc_z_argv(argc, argv, 0, NULL) != 0)
         return 1;
 
-    common_install_sigterm_handler(&szat_ctx->shutdown_requested);
+    ustaw_obsluge_sigterm(&szat_ctx->shutdown_requested);
     ustaw_shutdown_flag(&szat_ctx->shutdown_requested);
 
     szatnia();

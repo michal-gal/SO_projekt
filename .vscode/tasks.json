@@ -44,7 +44,7 @@
 			"command": "bash",
 			"args": [
 				"-lc",
-				"timeout 3s ./restauracja"
+				"timeout 3s ./build/bin/restauracja"
 			],
 			"isBackground": false,
 			"problemMatcher": []
@@ -69,7 +69,7 @@
 			"command": "bash",
 			"args": [
 				"-lc",
-				"timeout 3s ./restauracja"
+				"timeout 3s ./build/bin/restauracja"
 			],
 			"isBackground": false,
 			"problemMatcher": []

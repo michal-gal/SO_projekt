@@ -31,7 +31,7 @@ typedef struct
 
 // ====== ZMIENNE GLOBALNE ======
 
-// Per-module context for klient
+// Kontekst modułu klienta
 struct KlientCtx
 {
     volatile sig_atomic_t prosba_zamkniecia;
@@ -62,17 +62,17 @@ static void opusc_stolik(const struct Grupa *g);
 static void petla_czekania_na_dania(struct Grupa *g);
 static void *person_thread(void *arg);
 
-// Handler sygnału SIGTERM
+// Obsługa sygnału SIGTERM
 static void klient_obsluz_sigterm(int signo)
 {
     (void)signo;
     klient_ctx->prosba_zamkniecia = 1;
 }
 
-// Handler sygnału SIGUSR1
+// Obsługa sygnału SIGUSR1
 static void klient_obsluz_sigusr1(int signo) { (void)signo; }
 
-static long diff_ms(const struct timespec *start, const struct timespec *end)
+static long roznica_ms(const struct timespec *start, const struct timespec *end)
 {
     long sec = end->tv_sec - start->tv_sec;
     long nsec = end->tv_nsec - start->tv_nsec;
@@ -120,10 +120,18 @@ static void usadz_grupe_vip(struct Grupa *g)
     pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
 
     if (log_usadzono)
+    {
+        if (common_ctx->statystyki_sync &&
+            pthread_mutex_lock(&common_ctx->statystyki_sync->mutex) == 0)
+        {
+            (*common_ctx->klienci_przyjeci) += g->osoby;
+            pthread_mutex_unlock(&common_ctx->statystyki_sync->mutex);
+        }
         LOGI("Grupa VIP %d usadzona: %d osób (dorosłych: %d, dzieci: %d) przy "
              "stoliku: %d (miejsc zajete: %d/%d)\n",
              g->numer_grupy, g->osoby, g->dorosli, g->dzieci, log_numer_stolika,
              log_zajete, log_pojemnosc);
+    }
 }
 
 // Czekaj na przydział stolika
@@ -266,7 +274,7 @@ static void zamow_specjalne_jesli_trzeba(struct Grupa *g,
 {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    if (diff_ms(czas_start_dania, &now) <= timeout_dania_ms)
+    if (roznica_ms(czas_start_dania, &now) <= timeout_dania_ms)
         return;
     if (g->danie_specjalne != 0)
         return;
@@ -287,7 +295,7 @@ static void zamow_specjalne_jesli_trzeba(struct Grupa *g,
         }
     }
     pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-    /* Powiadom obsługę, że zamówiono danie specjalne (unikamy polling) */
+    /* Powiadom obsługę, że zamówiono danie specjalne (unikamy aktywnego odpytywania) */
     (void)pthread_cond_signal(&common_ctx->stoliki_sync->cond);
 
     LOGI("Grupa %d zamawia danie specjalne za: %d zł. \n", g->numer_grupy,
@@ -486,7 +494,12 @@ static void opusc_stolik(const struct Grupa *g)
     pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
 
     /* Zliczamy opuszczających klientów (osoby), nie tylko grupy. */
-    (*common_ctx->klienci_opuscili) += g->osoby;
+    if (common_ctx->statystyki_sync &&
+        pthread_mutex_lock(&common_ctx->statystyki_sync->mutex) == 0)
+    {
+        (*common_ctx->klienci_opuscili) += g->osoby;
+        pthread_mutex_unlock(&common_ctx->statystyki_sync->mutex);
+    }
     LOGP("Grupa %d przy stoliku %d opuszcza restaurację.\n", log_pid,
          log_numer_stolika);
 }

@@ -6,7 +6,7 @@
 #include <string.h> // strerror
 
 // ====== LOGOWANIE ======
-// Poziomy (runtime, LOG_LEVEL):
+// Poziomy (w trakcie działania, LOG_LEVEL):
 // - 0 = tylko podsumowania (LOGS)
 // - 1 = LOGP + LOGE + LOGS
 // - 2 = LOGI + LOGP + LOGE + LOGS
@@ -16,7 +16,7 @@
 //   YYYY-MM-DD HH:MM:SS pid=<pid> <LEVEL> <wiadomość>
 // gdzie LEVEL to: I/D/E.
 //
-// Log do pliku (runtime):
+// Log do pliku (w trakcie działania):
 // - domyślnie (bez zmiennych środowiskowych) tworzy plik:
 //     restauracja_YYYY-MM-DD_HH-MM-SS.log
 // - albo ustaw jawnie: RESTAURACJA_LOG_FILE=/ścieżka/do/pliku.log
@@ -24,58 +24,59 @@
 // - konsola zawsze tylko „podstawowe” logi (LOGS i ewentualnie LOGP)
 // - plik zawiera rosnący zakres w zależności od LOG_LEVEL
 //
-// Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND +
-// write(), co działa sensownie w wieloprocesowym środowisku.
+// Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND
+// oraz write(), co działa poprawnie w środowisku wieloprocesowym.
 #ifndef LOG_LEVEL
 #define LOG_LEVEL 1
 #endif
 
 extern int current_log_level;
 
-// Logger zapisuje do pliku, jeśli ustawisz zmienną środowiskową:
+// Moduł logowania zapisuje do pliku, jeśli ustawisz zmienną środowiskową:
 //   RESTAURACJA_LOG_FILE=/tmp/restauracja.log
 // Domyślnie logi nadal trafiają też na stdout/stderr. Żeby to wyłączyć:
 //   RESTAURACJA_LOG_STDIO=0
-void log_init_from_env(void);
-void log_printf(char level, const char *fmt, ...);
-void log_printf_force_stdio(char level, const char *fmt, ...);
+void inicjuj_log_z_env(void);
+void loguj(char level, const char *fmt, ...);
+void loguj_wymus_stdio(char level, const char *fmt, ...);
+void loguj_blokiem(char level, const char *buf);
 
 // ====== MAKRA LOGOWANIA ======
-#define LOGI(...)                   \
-  do                                \
-  {                                 \
-    if (current_log_level >= 2)     \
-      log_printf('I', __VA_ARGS__); \
+#define LOGI(...)               \
+  do                            \
+  {                             \
+    if (current_log_level >= 2) \
+      loguj('I', __VA_ARGS__);  \
   } while (0)
 
-#define LOGD(...)                   \
-  do                                \
-  {                                 \
-    if (current_log_level >= 3)     \
-      log_printf('D', __VA_ARGS__); \
+#define LOGD(...)               \
+  do                            \
+  {                             \
+    if (current_log_level >= 3) \
+      loguj('D', __VA_ARGS__);  \
   } while (0)
 
-#define LOGE(...)                   \
-  do                                \
-  {                                 \
-    if (current_log_level >= 1)     \
-      log_printf('E', __VA_ARGS__); \
+#define LOGE(...)               \
+  do                            \
+  {                             \
+    if (current_log_level >= 1) \
+      loguj('E', __VA_ARGS__);  \
   } while (0)
 
 // Podsumowania/komunikaty krytyczne: drukuj zawsze, niezależnie od LOG_LEVEL i
 // RESTAURACJA_LOG_STDIO.
-#define LOGS(...)                             \
-  do                                          \
-  {                                           \
-    log_printf_force_stdio('I', __VA_ARGS__); \
+#define LOGS(...)                        \
+  do                                     \
+  {                                      \
+    loguj_wymus_stdio('I', __VA_ARGS__); \
   } while (0)
 
 // Ważne zdarzenia procesowe (widoczne w LOG_LEVEL >= 1)
-#define LOGP(...)                   \
-  do                                \
-  {                                 \
-    if (current_log_level >= 1)     \
-      log_printf('P', __VA_ARGS__); \
+#define LOGP(...)               \
+  do                            \
+  {                             \
+    if (current_log_level >= 1) \
+      loguj('P', __VA_ARGS__);  \
   } while (0)
 
 #define LOGE_ERRNO(prefix)                       \

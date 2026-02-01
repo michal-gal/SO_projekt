@@ -3,33 +3,58 @@
 #include "restauracja.h" /* includes common.h */
 
 #include <stdio.h>
-/* Additional system headers not included via common.h */
+/* Dodatkowe nagłówki systemowe spoza common.h */
 #include <errno.h>
 #include <sched.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
 
+#ifndef BIN_DIR
+#define BIN_DIR "."
+#endif
+
 extern int current_log_level;
 
-/* Pomocnik: zwraca upływ sekund od czasu `start` według CLOCK_MONOTONIC. */
-static inline long elapsed_seconds_since(const struct timespec *start)
+/* Pomocnik: zwraca upływ sekund od czasu `poczatek` według CLOCK_MONOTONIC. */
+static inline long sekundy_od(const struct timespec *poczatek)
 {
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
         return 0;
-    return now.tv_sec - start->tv_sec;
+    return now.tv_sec - poczatek->tv_sec;
 }
 
-/* (Removed parse_env_positive) */
+static void dopisz_do_bufora(char *buf, size_t rozmiar, size_t *offset,
+                             const char *fmt, ...)
+{
+    if (!buf || !offset || *offset >= rozmiar)
+        return;
 
-/* Helper: parse positive integer strictly from argv; returns -1 on error. */
-static long parse_arg_positive_or_error(const char *s)
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *offset, rozmiar - *offset, fmt, ap);
+    va_end(ap);
+
+    if (n <= 0)
+        return;
+
+    size_t dodano = (size_t)n;
+    if (dodano >= rozmiar - *offset)
+        *offset = rozmiar - 1;
+    else
+        *offset += dodano;
+}
+
+/* Pomocnik: parsuje dodatnią liczbę z argv; zwraca -1 przy błędzie. */
+static long parsuj_arg_dodatni_lub_blad(const char *s)
 {
     if (!s)
         return -1;
@@ -41,44 +66,47 @@ static long parse_arg_positive_or_error(const char *s)
     return v;
 }
 
-/* Helper: parse integer from environment with inclusive range [min,max].
- * If env var is unset or invalid, returns `fallback`.
- * Use `max < 0` to indicate no upper bound. */
-static int parse_env_int_range(const char *name, int fallback, int min, int max)
+/* Pomocnik: parsuje int z env w zakresie [min,max].
+ * Gdy env nieustawiony lub błędny, zwraca wartość domyślną.
+ * Ustaw `max < 0`, aby nie mieć górnego limitu. */
+static int parsuj_env_int_zakres(const char *name, int domyslna, int min, int max)
 {
     const char *s = getenv(name);
     if (!s || !*s)
-        return fallback;
+        return domyslna;
     errno = 0;
     char *end = NULL;
     long v = strtol(s, &end, 10);
     if (errno == 0 && end && *end == '\0' && v >= min && (max < 0 || v <= max))
         return (int)v;
-    return fallback;
+    return domyslna;
 }
 
 // ====== ZMIENNE GLOBALNE ======
 
-/* Per-run context to reduce scattered globals. */
-struct RestauracjaCtx
+/* Kontekst uruchomienia, aby ograniczyć globalne pola. */
+struct KontekstRestauracji
 {
     char arg_shm[32];
     char arg_sem[32];
     char arg_msgq[32];
-    pid_t children_pgid;
-    volatile sig_atomic_t sigint_requested;
-    volatile sig_atomic_t shutdown_signal;
+    pid_t pgid_dzieci;
+    volatile sig_atomic_t zamkniecie_zadane;
+    volatile sig_atomic_t sygnal_zamkniecia;
+    volatile sig_atomic_t stop_generatora;
+    volatile sig_atomic_t stop_zbieracza;
 };
 
-static struct RestauracjaCtx ctx_storage = {.children_pgid = -1,
-                                            .sigint_requested = 0,
-                                            .shutdown_signal = 0};
-static struct RestauracjaCtx *ctx = &ctx_storage;
+static struct KontekstRestauracji kontekst_bufor = {.pgid_dzieci = -1,
+                                                    .zamkniecie_zadane = 0,
+                                                    .sygnal_zamkniecia = 0,
+                                                    .stop_generatora = 0,
+                                                    .stop_zbieracza = 0};
+static struct KontekstRestauracji *kontekst = &kontekst_bufor;
 
 // Wszystkie procesy potomne (obsluga/kucharz/kierownik/klienci) wrzucamy do
 // jednej grupy, żeby móc zakończyć je jednym sygnałem: kill(-pgid,
 // SIGTERM/SIGKILL).
-/* moved into `ctx` */
 
 // ====== HANDLERY SYGNAŁÓW ======
 
@@ -94,45 +122,42 @@ static void zamknij_odziedziczone_fd_przed_exec(void)
         (void)close(fd);
 }
 
-/* Handler is async-signal-safe: it only sets numeric flags. */
+/* Obsługa sygnału jest bezpieczna asynchronicznie: ustawia tylko flagi numeryczne. */
 
-/* Single signal handler that consolidates SIGINT/SIGQUIT/SIGTERM, SIGTSTP
- * and SIGCONT behavior. Keeping this local to the module keeps the
- * implementation details (and `ctx`) encapsulated in `restauracja.c`.
+/* Jedna obsługa łącząca SIGINT/SIGQUIT/SIGTERM oraz SIGTSTP/SIGCONT.
+ * Lokalny w module, aby szczegóły (i `kontekst`) pozostały w `restauracja.c`.
  */
-static void restauracja_signal_handler(int signo)
+static void obsluz_sygnal_restauracji(int signo)
 {
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTERM)
     {
-        ctx->sigint_requested = 1;
-        ctx->shutdown_signal = signo;
-        if (ctx->children_pgid > 0)
-            (void)kill(-ctx->children_pgid, SIGTERM);
+        kontekst->zamkniecie_zadane = 1;
+        kontekst->sygnal_zamkniecia = signo;
+        if (kontekst->pgid_dzieci > 0)
+            (void)kill(-kontekst->pgid_dzieci, SIGTERM);
     }
     else if (signo == SIGTSTP)
     {
-        if (ctx->children_pgid > 0)
-            (void)kill(-ctx->children_pgid, SIGTSTP);
+        if (kontekst->pgid_dzieci > 0)
+            (void)kill(-kontekst->pgid_dzieci, SIGTSTP);
         (void)kill(getpid(), SIGSTOP);
     }
     else if (signo == SIGCONT)
     {
-        if (ctx->children_pgid > 0)
-            (void)kill(-ctx->children_pgid, SIGCONT);
+        if (kontekst->pgid_dzieci > 0)
+            (void)kill(-kontekst->pgid_dzieci, SIGCONT);
     }
     else
     {
-        /* ignore other signals */
+        /* ignoruj pozostałe sygnały */
     }
 }
 
 // ====== ZARZĄDZANIE PROCESAMI ======
 
-/* Unified reaper: non-blocking waitpid loop. If `count_clients` is
- * non-zero, returns the number of reaped PIDs that are considered
- * client processes (skips obsluga/kucharz/kierownik). If
- * `count_clients` is zero the function behaves like the previous
- * `zbierz_zombie_nieblokujaco` (just reaps and logs). */
+/* Ujednolicony „zbieracz zombie”: pętla waitpid bez blokowania.
+ * Gdy `count_clients` != 0, zwraca liczbę zebranych PID klientów
+ * (pomija obsluga/kucharz/kierownik/szatnia). */
 static int zbierz_zombie_nieblokujaco(int *status, int count_clients)
 {
     int reaped = 0;
@@ -159,27 +184,74 @@ static int zbierz_zombie_nieblokujaco(int *status, int count_clients)
     return reaped;
 }
 
+static pid_t generator_utworz_jedna_grupe(int numer_grupy);
+
+struct GeneratorGrupCtx
+{
+    int liczba_utworzonych_grup;
+    int numer_grupy;
+};
+
+static void *watek_generatora_grup(void *arg)
+{
+    struct GeneratorGrupCtx *gctx = (struct GeneratorGrupCtx *)arg;
+
+    while (gctx->liczba_utworzonych_grup-- && !kontekst->zamkniecie_zadane &&
+           !kontekst->stop_generatora)
+    {
+        pid_t pid = generator_utworz_jedna_grupe(gctx->numer_grupy++);
+        if (pid > 0)
+        {
+            /* brak dodatkowych działań */
+        }
+        if (gctx->liczba_utworzonych_grup == 0)
+        {
+            printf("Utworzono wszystkie grupy klientów.\n");
+        }
+    }
+    free(gctx);
+    return NULL;
+}
+
+static void *watek_zbieracza_zombie(void *arg)
+{
+    (void)arg;
+    int status;
+
+    while (!kontekst->zamkniecie_zadane && !kontekst->stop_zbieracza)
+    {
+        (void)zbierz_zombie_nieblokujaco(&status, 0);
+        (void)usypiaj_ms(POLL_MS_MED);
+    }
+
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
+    return NULL;
+}
+
 static pid_t uruchom_potomka_exec(
     const char *file, const char *argv0, int numer_grupy,
-    int is_klient) // uruchamia proces potomny przez fork()+exec()
+    int czy_klient) // uruchamia proces potomny przez fork()+exec()
 {
     pid_t pid = fork();
     if (pid == 0)
     {
         zamknij_odziedziczone_fd_przed_exec();
-        if (is_klient)
+        if (czy_klient)
         {
             char arg_grupa[32];
             snprintf(arg_grupa, sizeof(arg_grupa), "%d", numer_grupy);
-            execl(file, argv0, ctx->arg_shm, ctx->arg_sem, ctx->arg_msgq, arg_grupa,
+            execl(file, argv0, kontekst->arg_shm, kontekst->arg_sem,
+                  kontekst->arg_msgq, arg_grupa,
                   (char *)NULL);
         }
         else
         {
-            execl(file, argv0, ctx->arg_shm, ctx->arg_sem, ctx->arg_msgq,
+            execl(file, argv0, kontekst->arg_shm, kontekst->arg_sem,
+                  kontekst->arg_msgq,
                   (char *)NULL);
         }
-        /* fallthrough handled above; no extra execl here */
+        /* ścieżka awaryjna; brak dodatkowego execl */
         LOGE_ERRNO("execl");
         _exit(127);
     }
@@ -191,31 +263,28 @@ static pid_t uruchom_potomka_exec(
     return pid;
 }
 
-/* Helper: launch child via uruchom_potomka_exec(), optionally register its PID
- * into shared memory slot `out_shm_pid`, and ensure it's placed into the
- * children process group. If `make_group_if_missing` is non-zero and
- * `children_pgid` is not yet set, the launched pid becomes the group leader.
- */
-static pid_t launch_child_and_set_group(const char *file, const char *argv0,
-                                        int numer_grupy, int is_klient,
-                                        pid_t *out_shm_pid,
-                                        int make_group_if_missing)
+/* Pomocnik: uruchamia potomka przez uruchom_potomka_exec(), opcjonalnie
+ * zapisuje PID do shm i dołącza do grupy procesów. */
+static pid_t uruchom_potomka_i_ustaw_grupe(const char *file, const char *argv0,
+                                           int numer_grupy, int czy_klient,
+                                           pid_t *pid_shm_wyj,
+                                           int utworz_grupe_jesli_brak)
 {
-    pid_t pid = uruchom_potomka_exec(file, argv0, numer_grupy, is_klient);
+    pid_t pid = uruchom_potomka_exec(file, argv0, numer_grupy, czy_klient);
     if (pid < 0)
         return -1;
 
-    if (out_shm_pid)
-        *out_shm_pid = pid;
+    if (pid_shm_wyj)
+        *pid_shm_wyj = pid;
 
-    if (make_group_if_missing && ctx->children_pgid <= 0)
+    if (utworz_grupe_jesli_brak && kontekst->pgid_dzieci <= 0)
     {
-        ctx->children_pgid = pid;
-        (void)setpgid(pid, ctx->children_pgid);
+        kontekst->pgid_dzieci = pid;
+        (void)setpgid(pid, kontekst->pgid_dzieci);
     }
-    else if (ctx->children_pgid > 0)
+    else if (kontekst->pgid_dzieci > 0)
     {
-        (void)setpgid(pid, ctx->children_pgid);
+        (void)setpgid(pid, kontekst->pgid_dzieci);
     }
     return pid;
 }
@@ -233,46 +302,46 @@ static int czy_grupa_procesow_pusta(
 static void zakoncz_wszystkie_dzieci(
     int *status) // kończy wszystkie procesy potomne w grupie
 {
-    /* Keep total wait time below typical test timeout (10s). */
+    /* Utrzymaj łączny czas oczekiwania poniżej typowego limitu testów (10 s). */
     const int timeout_term = SHUTDOWN_TERM_TIMEOUT;
     const int timeout_kill = SHUTDOWN_KILL_TIMEOUT;
 
-    LOGD("zakoncz_wszystkie_dzieci: pid=%d starting, children_pgid=%d\n",
-         (int)getpid(), (int)ctx->children_pgid);
-    if (ctx->children_pgid > 0)
+    LOGD("zakoncz_wszystkie_dzieci: pid=%d start, pgid_dzieci=%d\n",
+         (int)getpid(), (int)kontekst->pgid_dzieci);
+    if (kontekst->pgid_dzieci > 0)
     {
-        LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGTERM to -%d\n",
-             (int)getpid(), (int)ctx->children_pgid);
-        kill(-ctx->children_pgid, SIGTERM);
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d wysyłam SIGTERM do -%d\n",
+             (int)getpid(), (int)kontekst->pgid_dzieci);
+        kill(-kontekst->pgid_dzieci, SIGTERM);
     }
 
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    while (!czy_grupa_procesow_pusta(ctx->children_pgid) &&
-           elapsed_seconds_since(&start) < timeout_term)
+    while (!czy_grupa_procesow_pusta(kontekst->pgid_dzieci) &&
+           sekundy_od(&start) < timeout_term)
     {
-        LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting for children, elapsed=%ld\n",
-             (int)getpid(), (long)elapsed_seconds_since(&start));
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d czekam na dzieci, uplynelo=%ld\n",
+             (int)getpid(), (long)sekundy_od(&start));
         (void)zbierz_zombie_nieblokujaco(status, 0);
         sched_yield();
     }
 
-    if (!czy_grupa_procesow_pusta(ctx->children_pgid))
+    if (!czy_grupa_procesow_pusta(kontekst->pgid_dzieci))
     {
-        if (ctx->children_pgid > 0)
+        if (kontekst->pgid_dzieci > 0)
         {
-            LOGD("zakoncz_wszystkie_dzieci: pid=%d sending SIGKILL to -%d\n",
-                 (int)getpid(), (int)ctx->children_pgid);
-            kill(-ctx->children_pgid, SIGKILL);
+            LOGD("zakoncz_wszystkie_dzieci: pid=%d wysyłam SIGKILL do -%d\n",
+                 (int)getpid(), (int)kontekst->pgid_dzieci);
+            kill(-kontekst->pgid_dzieci, SIGKILL);
         }
 
         clock_gettime(CLOCK_MONOTONIC, &start);
-        while (!czy_grupa_procesow_pusta(ctx->children_pgid) &&
-               elapsed_seconds_since(&start) < timeout_kill)
+        while (!czy_grupa_procesow_pusta(kontekst->pgid_dzieci) &&
+               sekundy_od(&start) < timeout_kill)
         {
-            LOGD("zakoncz_wszystkie_dzieci: pid=%d waiting after SIGKILL, "
-                 "elapsed=%ld\n",
-                 (int)getpid(), (long)elapsed_seconds_since(&start));
+            LOGD("zakoncz_wszystkie_dzieci: pid=%d czekam po SIGKILL, "
+                 "uplynelo=%ld\n",
+                 (int)getpid(), (long)sekundy_od(&start));
             (void)zbierz_zombie_nieblokujaco(status, 0);
             sched_yield();
         }
@@ -280,10 +349,10 @@ static void zakoncz_wszystkie_dzieci(
 
     while (waitpid(-1, NULL, WNOHANG) > 0)
     {
-        LOGD("zakoncz_wszystkie_dzieci: pid=%d reaping remaining child\n",
+        LOGD("zakoncz_wszystkie_dzieci: pid=%d zbieram pozostale dzieci\n",
              (int)getpid());
     }
-    LOGD("zakoncz_wszystkie_dzieci: pid=%d finished\n", (int)getpid());
+    LOGD("zakoncz_wszystkie_dzieci: pid=%d zakonczono\n", (int)getpid());
 }
 
 // ====== GENERATOR KLIENTÓW ======
@@ -291,7 +360,7 @@ static void zakoncz_wszystkie_dzieci(
 static pid_t
 generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grupę klientów
 {
-    pid_t pid = uruchom_potomka_exec("./klient", "klient", numer_grupy, 1);
+    pid_t pid = uruchom_potomka_exec(BIN_DIR "/klient", "klient", numer_grupy, 1);
     if (pid < 0)
     {
         if (common_ctx->restauracja_otwarta)
@@ -302,8 +371,8 @@ generator_utworz_jedna_grupe(int numer_grupy) // tworzy jedną grupę klientów
         }
         return -1;
     }
-    if (ctx->children_pgid > 0)
-        (void)setpgid(pid, ctx->children_pgid);
+    if (kontekst->pgid_dzieci > 0)
+        (void)setpgid(pid, kontekst->pgid_dzieci);
     return pid;
 }
 
@@ -320,7 +389,7 @@ static int awaryjne_zamkniecie_fork(void) // sprzątanie przy błędzie fork()
         if (common_ctx->stoliki_sync)
             (void)pthread_cond_broadcast(&common_ctx->stoliki_sync->cond);
     }
-    /* Signal open/turn token so waiting workers don't stay blocked. */
+    /* Zasygnalizuj otwarcie/turę, by czekające wątki nie zostały zablokowane. */
     sygnalizuj_ture_na(1);
 
     LOGS("\n===Awaryjne zamknięcie: błąd tworzenia procesu (fork)!===\n");
@@ -459,34 +528,34 @@ static void zakoncz_klientow_i_wyczysc_stoliki_i_kolejke(
 }
 
 // ====== MAIN ======
-/* Initialize restaurant state and start helper processes.
- * On success returns 0 and sets *out_czas_pracy to the configured run time.
- * On failure returns non-zero (same as awaryjne_zamkniecie_fork()).
+/* Inicjalizuje stan restauracji i uruchamia procesy pomocnicze.
+ * Przy powodzeniu zwraca 0 i ustawia *out_czas_pracy na czas pracy.
+ * Przy błędzie zwraca wartość niezerową (jak awaryjne_zamkniecie_fork()).
  */
-int init_restauracja(int argc, char **argv, int *out_czas_pracy)
+int inicjuj_restauracje(int argc, char **argv, int *out_czas_pracy)
 {
     int klienci = LICZBA_GRUP_DEFAULT;
     int czas = CZAS_PRACY_DEFAULT;
     int log_level = LOG_LEVEL_DEFAULT;
 
-    /* Read defaults from environment (lenient) with validation. */
-    klienci = parse_env_int_range("RESTAURACJA_LICZBA_KLIENTOW", klienci, 1, -1);
-    log_level = parse_env_int_range("RESTAURACJA_LOG_LEVEL", log_level, 0, 2);
-    czas = parse_env_int_range("RESTAURACJA_CZAS_PRACY", czas, 1, -1);
+    /* Wczytaj domyślne wartości z env (łagodnie) z walidacją. */
+    klienci = parsuj_env_int_zakres("RESTAURACJA_LICZBA_KLIENTOW", klienci, 1, -1);
+    log_level = parsuj_env_int_zakres("RESTAURACJA_LOG_LEVEL", log_level, 0, 3);
+    czas = parsuj_env_int_zakres("RESTAURACJA_CZAS_PRACY", czas, 1, -1);
 
     if (argc < 1 || argc > 4)
     {
         fprintf(stderr,
                 "Użycie: %s [<liczba_klientow>] [<czas_sekund>] [<log_level>]\n",
                 argv[0]);
-        fprintf(stderr, "Domyślne: %d klientów, %d sekund, log level %d\n",
+        fprintf(stderr, "Domyślne: %d klientów, %d sekund, poziom logowania %d\n",
                 klienci, czas, log_level);
         return 1;
     }
 
     if (argc >= 2)
     {
-        long v = parse_arg_positive_or_error(argv[1]);
+        long v = parsuj_arg_dodatni_lub_blad(argv[1]);
         if (v < 0)
         {
             fprintf(stderr, "Błędna liczba klientów: %s\n", argv[1]);
@@ -497,7 +566,7 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 
     if (argc >= 3)
     {
-        long v = parse_arg_positive_or_error(argv[2]);
+        long v = parsuj_arg_dodatni_lub_blad(argv[2]);
         if (v < 0)
         {
             fprintf(stderr, "Błędny czas w sekundach: %s\n", argv[2]);
@@ -508,8 +577,8 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
 
     if (argc >= 4)
     {
-        long v = parse_arg_positive_or_error(argv[3]);
-        if (v < 0 || v > 2)
+        long v = parsuj_arg_dodatni_lub_blad(argv[3]);
+        if (v < 0 || v > 3)
         {
             fprintf(stderr, "Błędny log level (0-2): %s\n", argv[3]);
             return 1;
@@ -531,43 +600,41 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     stworz_ipc();
     generator_stolikow(common_ctx->stoliki);
     fflush(stdout);
-    snprintf(ctx->arg_shm, sizeof(ctx->arg_shm), "%d",
+    snprintf(kontekst->arg_shm, sizeof(kontekst->arg_shm), "%d",
              common_ctx->shm_id);
-    snprintf(ctx->arg_sem, sizeof(ctx->arg_sem), "%d",
+    snprintf(kontekst->arg_sem, sizeof(kontekst->arg_sem), "%d",
              common_ctx->sem_id);
-    snprintf(ctx->arg_msgq, sizeof(ctx->arg_msgq), "%d",
+    snprintf(kontekst->arg_msgq, sizeof(kontekst->arg_msgq), "%d",
              common_ctx->msgq_id);
 
     *common_ctx->restauracja_otwarta = 1;
     sygnalizuj_ture_na(1);
 
-    /* Register signal handlers early, before launching child processes, so
-     * the parent can respond to interrupts during startup and while
-     * creating children. */
-    signal(SIGINT, restauracja_signal_handler);
-    signal(SIGQUIT, restauracja_signal_handler);
-    signal(SIGTERM, restauracja_signal_handler);
-    signal(SIGTSTP, restauracja_signal_handler);
-    signal(SIGCONT, restauracja_signal_handler);
+    /* Zarejestruj obsługę sygnałów przed startem potomków. */
+    signal(SIGINT, obsluz_sygnal_restauracji);
+    signal(SIGQUIT, obsluz_sygnal_restauracji);
+    signal(SIGTERM, obsluz_sygnal_restauracji);
+    signal(SIGTSTP, obsluz_sygnal_restauracji);
+    signal(SIGCONT, obsluz_sygnal_restauracji);
 
     pid_t p;
-    p = launch_child_and_set_group("./obsluga", "obsluga", 0, 0,
-                                   common_ctx->pid_obsluga_shm, 1);
+    p = uruchom_potomka_i_ustaw_grupe(BIN_DIR "/obsluga", "obsluga", 0, 0,
+                                      common_ctx->pid_obsluga_shm, 1);
     common_ctx->pid_obsluga = p;
     if (common_ctx->pid_obsluga < 0)
         return awaryjne_zamkniecie_fork();
-    p = launch_child_and_set_group("./szatnia", "szatnia", 0, 0,
-                                   NULL, 0);
+    p = uruchom_potomka_i_ustaw_grupe(BIN_DIR "/szatnia", "szatnia", 0, 0,
+                                      NULL, 0);
     common_ctx->pid_szatnia = p;
     if (common_ctx->pid_szatnia < 0)
         return awaryjne_zamkniecie_fork();
-    p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
-                                   NULL, 0);
+    p = uruchom_potomka_i_ustaw_grupe(BIN_DIR "/kucharz", "kucharz", 0, 0,
+                                      NULL, 0);
     common_ctx->pid_kucharz = p;
     if (common_ctx->pid_kucharz < 0)
         return awaryjne_zamkniecie_fork();
-    p = launch_child_and_set_group("./kierownik", "kierownik", 0,
-                                   0, common_ctx->pid_kierownik_shm, 0);
+    p = uruchom_potomka_i_ustaw_grupe(BIN_DIR "/kierownik", "kierownik", 0,
+                                      0, common_ctx->pid_kierownik_shm, 0);
     common_ctx->pid_kierownik = p;
     if (common_ctx->pid_kierownik < 0)
         return awaryjne_zamkniecie_fork();
@@ -577,10 +644,8 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
     return 0;
 }
 
-/* Centralized shutdown/cleanup sequence extracted from run_restauracja().
- * Accepts pointer to status to allow reusing zakoncz_wszystkie_dzieci(&status).
- */
-int shutdown_restauracja(int *status)
+/* Scentralizowana sekwencja zamknięcia/sprzątania. */
+int zamknij_restauracje(int *status)
 {
     zakoncz_klientow_i_wyczysc_stoliki_i_kolejke();
     zakoncz_wszystkie_dzieci(status);
@@ -591,70 +656,96 @@ int shutdown_restauracja(int *status)
     if (common_ctx->msgq_id >= 0)
         msgctl(common_ctx->msgq_id, IPC_RMID, NULL);
 
-    LOGS("\n=== STATYSTYKI KLIENTÓW ===\n");
-    LOGS("Klienci przyjęci: %d\n", *common_ctx->klienci_przyjeci);
-    LOGS("Klienci którzy opuścili restaurację: %d\n", *common_ctx->klienci_opuscili);
-    LOGS("Klienci w kolejce: %d\n", *common_ctx->klienci_w_kolejce);
-    LOGS("===========================\n");
+    char buf[2048];
+    size_t offset = 0;
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "\n\n\n========== STATYSTYKI KLIENTÓW =================\n");
+    int przyjeci = 0;
+    int opuscili = 0;
+    int kolejka = 0;
+    if (common_ctx->statystyki_sync &&
+        pthread_mutex_lock(&common_ctx->statystyki_sync->mutex) == 0)
+    {
+        przyjeci = *common_ctx->klienci_przyjeci;
+        opuscili = *common_ctx->klienci_opuscili;
+        pthread_mutex_unlock(&common_ctx->statystyki_sync->mutex);
+    }
+    if (common_ctx->klienci_w_kolejce)
+        kolejka = *common_ctx->klienci_w_kolejce;
 
-    LOGS("Program zakończony.\n");
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "Klienci przyjęci: %d\n", przyjeci);
+    dopisz_do_bufora(buf, sizeof(buf), &offset,
+                     "Klienci którzy opuścili restaurację: %d\n", opuscili);
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "Klienci w kolejce: %d\n", kolejka);
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "================================================\n");
+    dopisz_do_bufora(buf, sizeof(buf), &offset, "Program zakończony.\n");
+
+    loguj_blokiem('I', buf);
     return 0;
 }
 
-/* Run the main restaurant loop and perform shutdown/cleanup. Returns 0. */
-int run_restauracja(int czas_pracy)
+/* Uruchamia główną pętlę restauracji i wykonuje sprzątanie. */
+int uruchom_restauracje(int czas_pracy)
 {
     struct timespec start_czekania;
     clock_gettime(CLOCK_MONOTONIC, &start_czekania);
     int status;
-    int aktywni_klienci = 0;
     int liczba_utworzonych_grup = liczba_klientow;
     int kierownik_interval = KIEROWNIK_INTERVAL_DEFAULT;
     struct timespec last_kierownik_post;
     clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
     int numer_grupy = 1;
-    while (liczba_utworzonych_grup-- && !ctx->sigint_requested)
-    {
-        if (kierownik_interval > 0 &&
-            elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
-        {
-            sem_operacja(SEM_KIEROWNIK, 1);
-            clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
-        }
-        aktywni_klienci -= zbierz_zombie_nieblokujaco(&status, 1);
 
-        pid_t pid = generator_utworz_jedna_grupe(numer_grupy++);
-        if (pid > 0)
-        {
-            aktywni_klienci++;
-        }
-        if (liczba_utworzonych_grup == 0)
-        {
-            printf("Utworzono wszystkie grupy klientów.\n");
-        }
+    struct GeneratorGrupCtx *gen_ctx = malloc(sizeof(*gen_ctx));
+    if (!gen_ctx)
+        return 1;
+    *gen_ctx = (struct GeneratorGrupCtx){
+        .liczba_utworzonych_grup = liczba_utworzonych_grup,
+        .numer_grupy = numer_grupy,
+    };
+    pthread_t watek_generatora;
+    pthread_t watek_zbieracza;
+    int rc_generator = pthread_create(&watek_generatora, NULL,
+                                      watek_generatora_grup, gen_ctx);
+    if (rc_generator != 0)
+    {
+        LOGE_ERRNO("pthread_create(watek_generatora_grup)");
+        (void)watek_generatora_grup(gen_ctx);
     }
+    else
+    {
+        (void)pthread_detach(watek_generatora);
+    }
+
+    int rc_zbieracz = pthread_create(&watek_zbieracza, NULL,
+                                     watek_zbieracza_zombie, NULL);
+    if (rc_zbieracz != 0)
+        LOGE_ERRNO("pthread_create(watek_zbieracza_zombie)");
+    else
+        (void)pthread_detach(watek_zbieracza);
 
     struct timespec sim_start;
     clock_gettime(CLOCK_MONOTONIC, &sim_start);
-    while (elapsed_seconds_since(&sim_start) < czas_pracy &&
-           !ctx->sigint_requested)
+    while (sekundy_od(&sim_start) < czas_pracy &&
+           !kontekst->zamkniecie_zadane)
     {
         if (kierownik_interval > 0 &&
-            elapsed_seconds_since(&last_kierownik_post) >= kierownik_interval)
+            sekundy_od(&last_kierownik_post) >= kierownik_interval)
         {
             sem_operacja(SEM_KIEROWNIK, 1);
             clock_gettime(CLOCK_MONOTONIC, &last_kierownik_post);
         }
-        (void)zbierz_zombie_nieblokujaco(&status, 0);
         sched_yield();
     }
 
-    int przerwano_sygnalem = ctx->sigint_requested;
-    int restauracja_otwarta_przed = *common_ctx->restauracja_otwarta;
-    int czas_minal = (elapsed_seconds_since(&start_czekania) >= czas_pracy);
+    kontekst->stop_generatora = 1;
+    kontekst->stop_zbieracza = 1;
 
-    LOGD("restauracja: pid=%d shutdown_signal=%d\n", (int)getpid(),
-         (int)ctx->shutdown_signal);
+    int przerwano_sygnalem = kontekst->zamkniecie_zadane;
+    int restauracja_otwarta_przed = *common_ctx->restauracja_otwarta;
+    int czas_minal = (sekundy_od(&start_czekania) >= czas_pracy);
+
+    LOGD("restauracja: pid=%d sygnal_zamkniecia=%d\n", (int)getpid(),
+         (int)kontekst->sygnal_zamkniecia);
 
     *common_ctx->restauracja_otwarta = 0;
     if (common_ctx->stoliki_sync)
@@ -662,11 +753,11 @@ int run_restauracja(int czas_pracy)
     if (przerwano_sygnalem)
     {
         const char *name = "(nieznany)";
-        if (ctx->shutdown_signal == SIGINT)
+        if (kontekst->sygnal_zamkniecia == SIGINT)
             name = "SIGINT";
-        else if (ctx->shutdown_signal == SIGQUIT)
+        else if (kontekst->sygnal_zamkniecia == SIGQUIT)
             name = "SIGQUIT";
-        else if (ctx->shutdown_signal == SIGTERM)
+        else if (kontekst->sygnal_zamkniecia == SIGTERM)
             name = "SIGTERM";
         LOGS("\n===Przerwano pracę restauracji (%s)!===\n", name);
     }
@@ -675,24 +766,24 @@ int run_restauracja(int czas_pracy)
     else
         LOGS("\n===Czas pracy restauracji minął!===\n");
 
-    LOGD("restauracja: pid=%d set turn=1, signaling SEM_TURA\n",
+    LOGD("restauracja: pid=%d ustawiam ture=1, sygnalizuje SEM_TURA_TURN1\n",
          (int)getpid());
     sygnalizuj_ture_na(1);
 
-    /* Wait for kucharz to notify parent that turn-3 processing completed. */
-    (void)sem_timedwait_seconds(SEM_PARENT_NOTIFY3, SUMMARY_WAIT_SECONDS);
-    (void)sleep_ms(POLL_MS_LONG);
+    /* Czekaj na powiadomienie od kucharza o zakończeniu tury 3. */
+    (void)sem_czekaj_sekund(SEM_PARENT_NOTIFY3, SUMMARY_WAIT_SECONDS);
+    (void)usypiaj_ms(POLL_MS_LONG);
 
-    /* Call centralized shutdown/cleanup helper. */
-    shutdown_restauracja(&status);
+    /* Wywołaj scentralizowane sprzątanie. */
+    zamknij_restauracje(&status);
     return 0;
 }
 
 int main(int argc, char **argv)
 {
     int czas_pracy = 0;
-    int rc = init_restauracja(argc, argv, &czas_pracy);
+    int rc = inicjuj_restauracje(argc, argv, &czas_pracy);
     if (rc != 0)
         return rc;
-    return run_restauracja(czas_pracy);
+    return uruchom_restauracje(czas_pracy);
 }

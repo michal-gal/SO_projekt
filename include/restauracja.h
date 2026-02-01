@@ -4,13 +4,14 @@
 // ====== INKLUDY ======
 #include "common.h"
 
-// Header dla modułu programu głównego (restauracja.c).
+// Nagłówek dla modułu programu głównego (restauracja.c).
 
-// Exported API
-// Initialize the restaurant subsystem. On success returns 0 and sets
-// `*out_czas_pracy` to the configured runtime; non-zero indicates error.
-int init_restauracja(int argc, char **argv, int *out_czas_pracy);
-int run_restauracja(int czas_pracy);
-int shutdown_restauracja(int *status);
+// API eksportowane
+// Inicjalizuje podsystem restauracji. Przy powodzeniu zwraca 0 i ustawia
+// `*out_czas_pracy` na skonfigurowany czas pracy; przy błędzie zwraca wartość
+// niezerową.
+int inicjuj_restauracje(int argc, char **argv, int *out_czas_pracy);
+int uruchom_restauracje(int czas_pracy);
+int zamknij_restauracje(int *status);
 
 #endif // RESTAURACJA_H
