@@ -1,6 +1,4 @@
 #include "common.h"
-#include "queue.h"
-
 #include <sched.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -33,70 +31,6 @@ static int zbierz_zamowienia_specjalne(struct SpecOrder *orders, int max);
 static void wyczysc_rezerwacje_specjalne(const struct SpecOrder *orders,
                                          int count);
 static void dodaj_danie(struct Talerzyk *tasma_local, int cena);
-
-// Wątek obsługi kolejki (usadzanie)
-static int usadz_grupe(const struct Grupa *g, int *numer_stolika,
-                       int *zajete, int *pojemnosc);
-static void *watek_kolejki(void *arg)
-{
-    (void)arg;
-    while (*common_ctx->restauracja_otwarta && !obsl_ctx->shutdown_requested)
-    {
-        struct Grupa g = kolejka_pobierz();
-        LOGD("obsluga: pid=%d kolejka_pobierz returned group=%d\n", (int)getpid(),
-             g.numer_grupy);
-        if (g.numer_grupy == 0)
-            continue;
-
-        int numer_stolika = 0;
-        int zajete = 0;
-        int pojemnosc = 0;
-        if (usadz_grupe(&g, &numer_stolika, &zajete, &pojemnosc))
-        {
-            LOGP("Grupa usadzona: %d przy stoliku: %d (%d/%d miejsc zajętych)\n",
-                 g.numer_grupy, numer_stolika, zajete, pojemnosc);
-            /* Zliczamy osoby (klientów), a nie grupy. */
-            (*common_ctx->klienci_przyjeci) += g.osoby;
-            if (g.proces_id > 0)
-                (void)kill(g.proces_id, SIGUSR1);
-        }
-        else if (*common_ctx->restauracja_otwarta)
-        {
-            kolejka_dodaj(g);
-        }
-
-        sched_yield();
-    }
-
-    return NULL;
-}
-
-static int usadz_grupe(const struct Grupa *g, int *numer_stolika,
-                       int *zajete, int *pojemnosc)
-{
-    int stolik_idx = -1;
-    int usadzono = 0;
-
-    pthread_mutex_lock(&common_ctx->stoliki_sync->mutex);
-    stolik_idx = znajdz_stolik_dla_grupy_zablokowanej(g);
-    if (stolik_idx >= 0)
-    {
-        struct Stolik *st = &common_ctx->stoliki[stolik_idx];
-        st->grupy[st->liczba_grup] = *g;
-        st->zajete_miejsca += g->osoby;
-        st->liczba_grup++;
-        usadzono = 1;
-        if (numer_stolika)
-            *numer_stolika = st->numer_stolika;
-        if (zajete)
-            *zajete = st->zajete_miejsca;
-        if (pojemnosc)
-            *pojemnosc = st->pojemnosc;
-    }
-    pthread_mutex_unlock(&common_ctx->stoliki_sync->mutex);
-
-    return usadzono;
-}
 
 // Wątek podawania dań normalnych
 static void *watek_podawania(void *arg)
@@ -368,9 +302,7 @@ void obsluga(void)
     ustaw_shutdown_flag(&obsl_ctx->shutdown_requested);
 
     // Create threads
-    pthread_t t_kolejka, t_podawanie, t_specjalne, t_podsumowanie;
-    if (pthread_create(&t_kolejka, NULL, watek_kolejki, NULL) != 0)
-        LOGE_ERRNO("pthread_create(kolejka)");
+    pthread_t t_podawanie, t_specjalne, t_podsumowanie;
     if (pthread_create(&t_podawanie, NULL, watek_podawania, NULL) != 0)
         LOGE_ERRNO("pthread_create(podawanie)");
     if (pthread_create(&t_specjalne, NULL, watek_specjalne, NULL) != 0)
@@ -389,10 +321,8 @@ void obsluga(void)
 
     // Shutdown threads
     obsl_ctx->shutdown_requested = 1;
-    (void)pthread_kill(t_kolejka, SIGTERM);
     (void)pthread_kill(t_podawanie, SIGTERM);
     (void)pthread_kill(t_specjalne, SIGTERM);
-    (void)pthread_join(t_kolejka, NULL);
     (void)pthread_join(t_podawanie, NULL);
     (void)pthread_join(t_specjalne, NULL);
 

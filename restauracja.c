@@ -146,7 +146,7 @@ static int zbierz_zombie_nieblokujaco(int *status, int count_clients)
             LOGD("restauracja: zbierz_zombie_nieblokujaco: pid=%d reaped=%d\n",
                  (int)getpid(), (int)p);
             if (p != common_ctx->pid_obsluga && p != common_ctx->pid_kucharz &&
-                p != common_ctx->pid_kierownik)
+                p != common_ctx->pid_kierownik && p != common_ctx->pid_szatnia)
                 reaped++;
         }
         else
@@ -555,6 +555,11 @@ int init_restauracja(int argc, char **argv, int *out_czas_pracy)
                                    common_ctx->pid_obsluga_shm, 1);
     common_ctx->pid_obsluga = p;
     if (common_ctx->pid_obsluga < 0)
+        return awaryjne_zamkniecie_fork();
+    p = launch_child_and_set_group("./szatnia", "szatnia", 0, 0,
+                                   NULL, 0);
+    common_ctx->pid_szatnia = p;
+    if (common_ctx->pid_szatnia < 0)
         return awaryjne_zamkniecie_fork();
     p = launch_child_and_set_group("./kucharz", "kucharz", 0, 0,
                                    NULL, 0);

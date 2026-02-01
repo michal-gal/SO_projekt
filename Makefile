@@ -17,14 +17,15 @@ CFLAGS += $(EXTRA_CFLAGS)
 LDFLAGS = -pthread
 
 TARGET = restauracja
-PROCS = klient obsluga kucharz kierownik
-HEADERS = common.h restauracja.h log.h queue.h
+PROCS = klient obsluga szatnia kucharz kierownik
+HEADERS = common.h restauracja.h log.h
 
-COMMON_OBJS = common.o log.o queue.o
+COMMON_OBJS = common.o log.o
 
 OBJECTS_RESTAURACJA = restauracja.o $(COMMON_OBJS)
 OBJECTS_KLIENT = klient.o $(COMMON_OBJS)
 OBJECTS_OBSLUGA = obsluga.o $(COMMON_OBJS)
+OBJECTS_SZATNIA = szatnia.o $(COMMON_OBJS)
 OBJECTS_KUCHARZ = kucharz.o $(COMMON_OBJS)
 OBJECTS_KIEROWNIK = kierownik.o $(COMMON_OBJS)
 
@@ -38,6 +39,9 @@ klient: $(OBJECTS_KLIENT)
 
 obsluga: $(OBJECTS_OBSLUGA)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_OBSLUGA)
+
+szatnia: $(OBJECTS_SZATNIA)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_SZATNIA)
 
 kucharz: $(OBJECTS_KUCHARZ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS_KUCHARZ)
@@ -55,14 +59,15 @@ common.o: common.c $(HEADERS)
 log.o: log.c log.h
 	$(CC) $(CFLAGS) -c log.c
 
-queue.o: queue.c queue.h common.h
-	$(CC) $(CFLAGS) -c queue.c
 
 klient.o: klient.c $(HEADERS)
 	$(CC) $(CFLAGS) -c klient.c
 
 obsluga.o: obsluga.c $(HEADERS)
 	$(CC) $(CFLAGS) -c obsluga.c
+
+szatnia.o: szatnia.c $(HEADERS)
+	$(CC) $(CFLAGS) -c szatnia.c
 
 kucharz.o: kucharz.c $(HEADERS)
 	$(CC) $(CFLAGS) -c kucharz.c

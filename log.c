@@ -171,8 +171,23 @@ static void log_vprintf(char level, const char *fmt, va_list ap,
         out_len += want;
     }
 
-    /* Always write to log file when available. */
-    if (log_ctx->log_fd >= 0)
+    /* File policy: include more logs as LOG_LEVEL increases. */
+    int write_file = force_stdio;
+    if (!write_file)
+    {
+        if (level == 'D')
+            write_file = (current_log_level >= 3);
+        else if (level == 'I')
+            write_file = (current_log_level >= 2);
+        else if (level == 'P')
+            write_file = (current_log_level >= 1);
+        else if (level == 'E')
+            write_file = (current_log_level >= 1);
+        else
+            write_file = 1;
+    }
+
+    if (write_file && log_ctx->log_fd >= 0)
         (void)write(log_ctx->log_fd, out, out_len);
 
     /*

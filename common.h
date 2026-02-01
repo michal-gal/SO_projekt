@@ -145,6 +145,7 @@ struct CommonCtx
   pid_t pid_obsluga;
   pid_t pid_kucharz;
   pid_t pid_kierownik;
+  pid_t pid_szatnia;
   pid_t *pid_obsluga_shm;
   pid_t *pid_kierownik_shm;
   int disable_close;

@@ -6,10 +6,11 @@
 #include <string.h> // strerror
 
 // ====== LOGOWANIE ======
-// Poziomy (compile-time):
-// - 0 = tylko podsumowania (LOGI/LOGD/LOGE wyciszone)
-// - 1 = tylko podsumowania (jak poprzednie LOG_LEVEL=0)
-// - 2 = błędy i podsumowania (jak poprzednie LOG_LEVEL=1)
+// Poziomy (runtime, LOG_LEVEL):
+// - 0 = tylko podsumowania (LOGS)
+// - 1 = LOGP + LOGE + LOGS
+// - 2 = LOGI + LOGP + LOGE + LOGS
+// - 3 = LOGD + LOGI + LOGP + LOGE + LOGS
 //
 // Format wpisu (prefiks dodawany automatycznie do LOGI/LOGD/LOGE):
 //   YYYY-MM-DD HH:MM:SS pid=<pid> <LEVEL> <wiadomość>
@@ -20,6 +21,8 @@
 //     restauracja_YYYY-MM-DD_HH-MM-SS.log
 // - albo ustaw jawnie: RESTAURACJA_LOG_FILE=/ścieżka/do/pliku.log
 // - wyłącz duplikację na stdout/stderr: RESTAURACJA_LOG_STDIO=0
+// - konsola zawsze tylko „podstawowe” logi (LOGS i ewentualnie LOGP)
+// - plik zawiera rosnący zakres w zależności od LOG_LEVEL
 //
 // Uwaga: logger jest współdzielony przez wszystkie procesy i używa O_APPEND +
 // write(), co działa sensownie w wieloprocesowym środowisku.
@@ -41,20 +44,21 @@ void log_printf_force_stdio(char level, const char *fmt, ...);
 #define LOGI(...)                   \
   do                                \
   {                                 \
-    if (current_log_level >= 3)     \
+    if (current_log_level >= 2)     \
       log_printf('I', __VA_ARGS__); \
   } while (0)
 
-#define LOGD(...)                 \
-  do                              \
-  {                               \
-    log_printf('D', __VA_ARGS__); \
+#define LOGD(...)                   \
+  do                                \
+  {                                 \
+    if (current_log_level >= 3)     \
+      log_printf('D', __VA_ARGS__); \
   } while (0)
 
 #define LOGE(...)                   \
   do                                \
   {                                 \
-    if (current_log_level >= 2)     \
+    if (current_log_level >= 1)     \
       log_printf('E', __VA_ARGS__); \
   } while (0)
 

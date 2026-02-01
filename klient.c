@@ -1,11 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "common.h"
-#include "queue.h"
 
+#include <errno.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/msg.h>
 #include <unistd.h>
 
 // ====== TYPY ======
@@ -39,6 +40,8 @@ struct KlientCtx
 
 static struct KlientCtx klient_ctx_storage = {.prosba_zamkniecia = 0, .klient_dania_mutex = PTHREAD_MUTEX_INITIALIZER};
 static struct KlientCtx *klient_ctx = &klient_ctx_storage;
+
+static void kolejka_dodaj_local(struct Grupa g);
 
 // ====== DEKLARACJE WSTĘPNE ======
 
@@ -135,7 +138,7 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
     // co mogłoby spowodować, że klient przegapi przebudzenie.
     sigprocmask(SIG_BLOCK, &block_set, &old_set);
 
-    kolejka_dodaj(*g);
+    kolejka_dodaj_local(*g);
     /* LOGD("Grupa %d dodana do kolejki: %d osób (dorosłych: %d, dzieci: %d)%s\n",
          g->numer_grupy,
          g->osoby,
@@ -185,6 +188,74 @@ static int czekaj_na_przydzial_stolika(struct Grupa *g)
         return -1;
     }
     return 0;
+}
+
+static void kolejka_dodaj_local(struct Grupa g)
+{
+    QueueMsg msg;
+    msg.mtype = 1;
+    msg.grupa = g;
+    for (;;)
+    {
+        if (!*common_ctx->restauracja_otwarta)
+            return;
+
+        struct timespec now, abstime;
+        clock_gettime(CLOCK_REALTIME, &now);
+        abstime = now;
+        abstime.tv_sec += 1;
+
+        if (pthread_mutex_lock(&common_ctx->queue_sync->mutex) != 0)
+            continue;
+        while (common_ctx->queue_sync->count >= common_ctx->queue_sync->max)
+        {
+            int rc = pthread_cond_timedwait(
+                &common_ctx->queue_sync->not_full, &common_ctx->queue_sync->mutex,
+                &abstime);
+            if (rc == ETIMEDOUT)
+            {
+                if (!*common_ctx->restauracja_otwarta)
+                {
+                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
+                    return;
+                }
+                clock_gettime(CLOCK_REALTIME, &now);
+                abstime = now;
+                abstime.tv_sec += 1;
+                continue;
+            }
+            if (rc != 0)
+            {
+                if (common_ctx->shutdown_flag_ptr &&
+                    *common_ctx->shutdown_flag_ptr)
+                {
+                    pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
+                    exit(0);
+                }
+                continue;
+            }
+        }
+
+        if (msgsnd(common_ctx->msgq_id, &msg, sizeof(msg.grupa), IPC_NOWAIT) == 0)
+        {
+            common_ctx->queue_sync->count++;
+            (*common_ctx->klienci_w_kolejce) += msg.grupa.osoby;
+            pthread_cond_signal(&common_ctx->queue_sync->not_empty);
+            pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
+            return;
+        }
+
+        pthread_mutex_unlock(&common_ctx->queue_sync->mutex);
+
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN)
+            continue;
+        if (errno == EIDRM || errno == EINVAL)
+            exit(0);
+
+        return;
+    }
 }
 
 // Zamów specjalne jeśli trzeba
