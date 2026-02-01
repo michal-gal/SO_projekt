@@ -2,10 +2,9 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-/* Common definitions, types and prototypes used across modules. This file
- * centralizes shared configuration and the `CommonCtx` used by processes
- * cooperating via shared memory and semaphores. Keep this header minimal
- * and header-include safe.
+/* Wspólne definicje, typy i prototypy używane w modułach. Plik centralizuje
+ * konfigurację oraz `CommonCtx` używany przez procesy współpracujące przez
+ * pamięć współdzieloną i semafory. Trzymaj ten nagłówek możliwie minimalny.
  */
 
 #include "log.h"
@@ -16,10 +15,10 @@
 #include <time.h>
 #include <stddef.h>
 
-/* Small helpers and constants */
+/* Małe pomocniki i stałe */
 #define NSEC_PER_MSEC 1000000L
 
-static inline int sleep_ms(unsigned ms)
+static inline int usypiaj_ms(unsigned ms)
 {
   struct timespec req;
   req.tv_sec = ms / 1000;
@@ -65,7 +64,7 @@ extern int liczba_klientow;
 extern int czas_pracy_domyslny;
 extern int current_log_level;
 
-/* Basic shared types used by multiple modules. Keep these stable. */
+/* Podstawowe typy współdzielone między modułami. */
 struct Grupa
 {
   int numer_grupy;
@@ -124,7 +123,7 @@ typedef struct // komunikat kolejki
   struct Grupa grupa;
 } QueueMsg;
 
-/* Centralized runtime context shared via pointers in shared memory. */
+/* Centralny kontekst uruchomienia współdzielony przez wskaźniki w shm. */
 struct CommonCtx
 {
   int shm_id;
@@ -138,7 +137,7 @@ struct CommonCtx
   struct TasmaSync *tasma_sync;
   struct StolikiSync *stoliki_sync;
   struct QueueSync *queue_sync;
-  /* Removed: int *kolej_podsumowania; use semaphores for turn notifications */
+  /* Usunięto: int *kolej_podsumowania; używamy semaforów tur. */
   int *klienci_w_kolejce;
   int *klienci_przyjeci;
   int *klienci_opuscili;
@@ -157,25 +156,21 @@ extern struct CommonCtx *common_ctx;
 extern const int ILOSC_STOLIKOW[4];
 extern const int CENY_DAN[6];
 
-/* Semaphore indices used across modules */
+/* Indeksy semaforów używane w modułach */
 #define SEM_TURA 0
 #define SEM_KIEROWNIK 1
-/* Additional semaphores used for explicit "turns" (1..3). These provide
- * dedicated tokens that waiting processes can consume instead of relying
- * on a shared integer flag. Using separate indices keeps backward
- * compatibility with the existing SEM_TURA (open token). */
+/* Dodatkowe semafory dla tur (1..3). */
 #define SEM_TURA_TURN1 2
 #define SEM_TURA_TURN2 3
 #define SEM_TURA_TURN3 4
-/* Parent notification semaphores: used by worker processes to notify the
- * parent that turn-2 / turn-3 processing completed. */
+/* Semafory powiadomień dla rodzica (tury 2/3). */
 #define SEM_PARENT_NOTIFY2 5
 #define SEM_PARENT_NOTIFY3 6
 
-/* Prototypes for functions referenced from other translation units. */
+/* Prototypy funkcji używanych między modułami. */
 void sem_operacja(int sem, int val);
 void ustaw_shutdown_flag(volatile sig_atomic_t *flag);
-void common_install_sigterm_handler(volatile sig_atomic_t *flag);
+void ustaw_obsluge_sigterm(volatile sig_atomic_t *flag);
 void kierownik_zamknij_restauracje_i_zakoncz_klientow(void);
 void stworz_ipc(void);
 void dolacz_ipc(int shm_id_existing, int sem_id_existing);
@@ -185,7 +180,7 @@ int cena_na_indeks(int cena);
 int znajdz_stolik_dla_grupy_zablokowanej(const struct Grupa *g);
 void czekaj_na_ture(int turn, volatile sig_atomic_t *shutdown);
 void sygnalizuj_ture_na(int turn);
-int sem_timedwait_seconds(int sem_idx, int seconds);
+int sem_czekaj_sekund(int sem_idx, int seconds);
 int parsuj_int_lub_zakoncz(const char *what, const char *s);
 void zainicjuj_losowosc(void);
 

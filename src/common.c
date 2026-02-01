@@ -9,11 +9,11 @@
 #include <sys/sem.h>
 #include <sys/shm.h>
 
-// `struct CommonCtx` is defined in common.h; instantiate storage here.
+// `struct CommonCtx` jest zdefiniowany w common.h; tutaj instancja pamięci.
 struct CommonCtx common_ctx_storage = {0};
 struct CommonCtx *common_ctx = &common_ctx_storage;
 
-static void init_shared_mutex(pthread_mutex_t *mutex, const char *err)
+static void inicjuj_mutex_wspoldzielony(pthread_mutex_t *mutex, const char *err)
 {
     pthread_mutexattr_t mattr;
     if (pthread_mutexattr_init(&mattr) != 0 ||
@@ -26,7 +26,7 @@ static void init_shared_mutex(pthread_mutex_t *mutex, const char *err)
     (void)pthread_mutexattr_destroy(&mattr);
 }
 
-static void init_shared_cond(pthread_cond_t *cond, const char *err)
+static void inicjuj_cond_wspoldzielony(pthread_cond_t *cond, const char *err)
 {
     pthread_condattr_t cattr;
     if (pthread_condattr_init(&cattr) != 0 ||
@@ -39,7 +39,7 @@ static void init_shared_cond(pthread_cond_t *cond, const char *err)
     (void)pthread_condattr_destroy(&cattr);
 }
 
-static void assign_shared_layout(void *base)
+static void przypisz_uklad_wspoldzielony(void *base)
 {
     common_ctx->stoliki = (struct Stolik *)base;
     common_ctx->tasma = (struct Talerzyk *)(common_ctx->stoliki + MAX_STOLIKI);
@@ -57,7 +57,7 @@ static void assign_shared_layout(void *base)
     common_ctx->queue_sync = (struct QueueSync *)(common_ctx->tasma_sync + 1);
 }
 
-static void init_semaphores(void)
+static void inicjuj_semafory(void)
 {
     common_ctx->sem_id = semget(IPC_PRIVATE, 7, IPC_CREAT | 0600);
     int sem_idxs[] = {SEM_TURA, SEM_KIEROWNIK, SEM_TURA_TURN1,
@@ -67,24 +67,20 @@ static void init_semaphores(void)
         semctl(common_ctx->sem_id, sem_idxs[i], SETVAL, 0);
 }
 
-/* Unified default for number of random groups is provided at runtime
- * (RESTAURACJA_LICZBA_KLIENTOW). Initialize to 0 here so the
- * runtime initializer (`init_restauracja`) sets the actual value. */
-/* Single authoritative client count; initialized at runtime by
- * `init_restauracja()` (from argv/env), default 0 meaning "not set yet". */
+/* Domyślna liczba grup jest ustawiana w runtime (RESTAURACJA_LICZBA_KLIENTOW).
+ * Tutaj 0 oznacza "jeszcze nie ustawiono". */
 int liczba_klientow = 0;
 int czas_pracy_domyslny = CZAS_PRACY;
 
-// ====== ZMIENNE GLOBALNE  ======
+// ====== ZMIENNE GLOBALNE ======
 
-const int ILOSC_STOLIKOW[4] = {X1, X2, X3,
-                               X4};                     // liczba stolików o pojemności 1,2,3,4
+const int ILOSC_STOLIKOW[4] = {X1, X2, X3, X4}; // liczba stolików 1..4
 const int CENY_DAN[6] = {p10, p15, p20, p40, p50, p60}; // ceny dań
 
 // ====== INICJALIZACJA ======
 void zainicjuj_losowosc(void) // inicjalizuje generator liczb losowych
 {
-    log_init_from_env();
+    inicjuj_log_z_env();
     const char *seed_env = getenv("RESTAURACJA_SEED");
     if (seed_env && *seed_env)
     {
@@ -144,19 +140,19 @@ void ustaw_shutdown_flag(volatile sig_atomic_t *flag)
     common_ctx->shutdown_flag_ptr = flag;
 }
 
-static volatile sig_atomic_t *common_sigterm_flag = NULL;
+static volatile sig_atomic_t *wspolna_flaga_sigterm = NULL;
 
-static void common_sigterm_handler(int signo)
+static void obsluga_sigterm_wspolna(int signo)
 {
     (void)signo;
-    if (common_sigterm_flag)
-        *common_sigterm_flag = 1;
+    if (wspolna_flaga_sigterm)
+        *wspolna_flaga_sigterm = 1;
 }
 
-void common_install_sigterm_handler(volatile sig_atomic_t *flag)
+void ustaw_obsluge_sigterm(volatile sig_atomic_t *flag)
 {
-    common_sigterm_flag = flag;
-    if (signal(SIGTERM, common_sigterm_handler) == SIG_ERR)
+    wspolna_flaga_sigterm = flag;
+    if (signal(SIGTERM, obsluga_sigterm_wspolna) == SIG_ERR)
         LOGE_ERRNO("signal(SIGTERM)");
 }
 
@@ -178,9 +174,9 @@ void czekaj_na_ture(int turn,
     }
 }
 
-// Try to decrement semaphore without blocking. Returns 0 on success,
-// -1 if would block, exits on unrecoverable error.
-int sem_trywait(int sem_idx)
+// Spróbuj zmniejszyć semafor bez blokowania. Zwraca 0 przy sukcesie,
+// -1 gdy blokowałby, kończy proces przy błędzie krytycznym.
+int sem_probuj(int sem_idx)
 {
     struct sembuf sb = {sem_idx, -1, IPC_NOWAIT};
     if (semop(common_ctx->sem_id, &sb, 1) == 0)
@@ -194,15 +190,15 @@ int sem_trywait(int sem_idx)
 
 // Wait up to `seconds` for semaphore to be available. Returns 0 on success,
 // -1 on timeout.
-int sem_timedwait_seconds(int sem_idx, int seconds)
+int sem_czekaj_sekund(int sem_idx, int seconds)
 {
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
     for (;;)
     {
-        if (sem_trywait(sem_idx) == 0)
+        if (sem_probuj(sem_idx) == 0)
             return 0;
-        (void)sleep_ms(POLL_MS_MED);
+        (void)usypiaj_ms(POLL_MS_MED);
         clock_gettime(CLOCK_MONOTONIC, &now);
         if ((now.tv_sec - start.tv_sec) >= seconds)
             break;
@@ -210,7 +206,7 @@ int sem_timedwait_seconds(int sem_idx, int seconds)
     return -1;
 }
 
-/* legacy wrapper removed: use sygnalizuj_ture_na(turn) directly */
+/* Usunięto wrapper: używaj sygnalizuj_ture_na(turn). */
 
 void sygnalizuj_ture_na(int turn)
 {
@@ -298,34 +294,34 @@ void stworz_ipc(void) // tworzy zasoby IPC (pamięć współdzieloną i semafory
         exit(1);
     }
     memset(pamiec_wspoldzielona, 0, bufor_size); // wyczyść pamięć współdzieloną
-    assign_shared_layout(pamiec_wspoldzielona);
+    przypisz_uklad_wspoldzielony(pamiec_wspoldzielona);
 
     common_ctx->tasma_sync->count = 0;
-    init_shared_mutex(&common_ctx->tasma_sync->mutex,
+    inicjuj_mutex_wspoldzielony(&common_ctx->tasma_sync->mutex,
                       "Nie udało się zainicjalizować mutexa taśmy\n");
-    init_shared_cond(&common_ctx->tasma_sync->not_full,
+    inicjuj_cond_wspoldzielony(&common_ctx->tasma_sync->not_full,
                      "Nie udało się zainicjalizować cond taśmy\n");
-    init_shared_cond(&common_ctx->tasma_sync->not_empty,
+    inicjuj_cond_wspoldzielony(&common_ctx->tasma_sync->not_empty,
                      "Nie udało się zainicjalizować cond taśmy\n");
 
     /* Zainicjalizuj mutex/cond stolików (współdzielone między procesami) */
-    init_shared_mutex(&common_ctx->stoliki_sync->mutex,
+    inicjuj_mutex_wspoldzielony(&common_ctx->stoliki_sync->mutex,
                       "Nie udało się zainicjalizować mutexa stolików\n");
-    init_shared_cond(&common_ctx->stoliki_sync->cond,
+    inicjuj_cond_wspoldzielony(&common_ctx->stoliki_sync->cond,
                      "Nie udało się zainicjalizować cond stolików\n");
 
     /* Zainicjalizuj synchronizację kolejki (współdzielona między procesami) */
     common_ctx->queue_sync->count = 0;
     common_ctx->queue_sync->max = MAX_KOLEJKA_MSG - KOLEJKA_REZERWA;
-    init_shared_mutex(&common_ctx->queue_sync->mutex,
+    inicjuj_mutex_wspoldzielony(&common_ctx->queue_sync->mutex,
                       "Nie udało się zainicjalizować mutexa kolejki\n");
-    init_shared_cond(&common_ctx->queue_sync->not_full,
+    inicjuj_cond_wspoldzielony(&common_ctx->queue_sync->not_full,
                      "Nie udało się zainicjalizować cond kolejki\n");
-    init_shared_cond(&common_ctx->queue_sync->not_empty,
+    inicjuj_cond_wspoldzielony(&common_ctx->queue_sync->not_empty,
                      "Nie udało się zainicjalizować cond kolejki\n");
 
     /* Semafory (otwarcie, kierownik, tury, powiadomienia) */
-    init_semaphores();
+    inicjuj_semafory();
 
     common_ctx->msgq_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600); // utwórz kolejkę komunikatów
     if (common_ctx->msgq_id < 0)
@@ -349,7 +345,7 @@ void dolacz_ipc(
         LOGE_ERRNO("shmat");
         exit(1);
     }
-    assign_shared_layout(pamiec_wspoldzielona);
+    przypisz_uklad_wspoldzielony(pamiec_wspoldzielona);
 }
 
 int dolacz_ipc_z_argv(int argc, char **argv, int potrzebuje_grupy,
